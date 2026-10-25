@@ -51,6 +51,8 @@ export interface AfterSaleRow {
   createdAt: string;
   /** 待处理且已超过商家处理时限（仅提醒，不会自动退款） */
   overdue?: boolean;
+  /** 待处理且已超过升级阈值（默认 3 天），触发顶部横幅与每日外发提醒 */
+  escalated?: boolean;
   /** 订单实付金额（分） */
   orderTotal?: number;
   orderStatus?: string;
@@ -63,6 +65,10 @@ export interface AfterSalePage extends Page<AfterSaleRow> {
   counts: Partial<Record<AfterSaleStatus, number>>;
   /** 待处理中已超时的笔数（仅提醒，不会自动退款） */
   overdueCount?: number;
+  /** 已升级（超过升级阈值仍待处理）的笔数 */
+  escalatedCount?: number;
+  /** 升级阈值（天），0 表示不升级 */
+  escalateDays?: number;
   /** 商家处理提醒时限（小时）：超时只在界面标红，不会自动同意 */
   reviewHours: number;
   /** 买家寄回时限（天）：超时自动关闭；0 表示不自动关闭 */
@@ -74,10 +80,18 @@ export interface AfterSalePage extends Page<AfterSaleRow> {
 export function adminListAfterSales(params: {
   status?: AfterSaleStatus;
   keyword?: string;
+  /** 只看「已升级」（超过升级阈值仍待处理）的单 */
+  escalatedOnly?: boolean;
   page?: number;
   size?: number;
 }): Promise<AfterSalePage> {
-  return api.get<AfterSalePage>('/admin/after-sales', { params });
+  return api.get<AfterSalePage>('/admin/after-sales', {
+    params: {
+      ...params,
+      // 后端按字符串布尔解析，避免 axios 把 false 序列化成 "false" 之外的形态
+      escalatedOnly: params.escalatedOnly ? '1' : undefined,
+    },
+  });
 }
 
 export function adminGetAfterSale(afterSaleNo: string): Promise<AfterSaleRow> {

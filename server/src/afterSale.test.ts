@@ -2,7 +2,7 @@ import request from 'supertest';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createApp } from './app';
 import { prisma } from './db';
-import { approveAfterSale, rejectAfterSale, confirmReturnReceived, autoProgressAfterSales } from './services/afterSaleService';
+import { approveAfterSale, rejectAfterSale, confirmReturnReceived, autoProgressAfterSales, alertOverdueAfterSales } from './services/afterSaleService';
 
 // 售后状态机端到端测试。重点覆盖两类风险：
 //  ① 资金：同一订单被重复退款、超额退款
@@ -331,6 +331,29 @@ describe('超时处理', () => {
     const row = await prisma.afterSale.findUnique({ where: { afterSaleNo } });
     expect(row?.status).toBe('COMPLETED');
     expect(row?.refundedAmount).toBe(19900);
+  });
+
+  it('升级提醒只发通知，不改状态、不退款', async () => {
+    const orderNo = await makeOrder('PAID');
+    const apply = await request(createApp())
+      .post('/api/after-sales')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ orderNo, type: 'REFUND_ONLY', reason: 'NOT_SHIPPED' });
+    const afterSaleNo = apply.body.data.afterSaleNo;
+
+    // 挂满 4 天（默认升级阈值 3 天）
+    await prisma.afterSale.update({
+      where: { afterSaleNo },
+      data: { createdAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000) },
+    });
+
+    // 未配置 webhook → 只打日志；无论如何都不能动状态和钱
+    await alertOverdueAfterSales();
+
+    const row = await prisma.afterSale.findUnique({ where: { afterSaleNo } });
+    expect(row?.status).toBe('PENDING');
+    expect(row?.refundedAmount).toBe(0);
+    expect(row?.refundNo).toBeNull();
   });
 
   it('买家超时未退货 → 售后自动关闭（不退款）', async () => {

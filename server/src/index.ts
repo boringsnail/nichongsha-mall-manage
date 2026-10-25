@@ -8,7 +8,7 @@ import {
   orderExpireMinutes,
   autoConfirmDays,
 } from './services/orderService.js';
-import { autoProgressAfterSales, reconcileRefundingAfterSales } from './services/afterSaleService.js';
+import { autoProgressAfterSales, alertOverdueAfterSales, reconcileRefundingAfterSales } from './services/afterSaleService.js';
 
 const HOST = process.env.HOST ?? '0.0.0.0';
 const app = createApp();
@@ -115,12 +115,15 @@ autoConfirmTimer.unref();
 // ① 商家超时未处理（默认 48h）→ 只标红提醒，**不自动同意、不自动退款**（必须商家确认）
 // ② 买家超时未寄回（默认 7 天）→ 售后自动关闭（不涉及资金）
 // ③ 卡在「退款中」的售后主动查一次微信，补落退款回调丢失的
+// ④ 超过升级阈值（默认 3 天）仍未处理 → 每天固定时刻外发一次汇总提醒（可选 webhook）
 // 每 10 分钟一轮。
 const AFTER_SALE_INTERVAL_MS = 10 * 60 * 1000;
 const afterSaleTimer = setInterval(() => {
   autoProgressAfterSales().then((n) => {
     if (n > 0) console.log(`[after-sale] 本轮自动关闭 ${n} 笔超时未退货售后`);
   }).catch(() => {});
+  // 每日一次，内部自行去重；没配 webhook 就退化成日志
+  alertOverdueAfterSales().catch(() => {});
   reconcileRefundingAfterSales().catch(() => {});
 }, AFTER_SALE_INTERVAL_MS);
 afterSaleTimer.unref();

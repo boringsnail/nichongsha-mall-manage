@@ -1,13 +1,33 @@
 <template>
   <div>
+    <!-- 升级横幅：超过升级阈值仍无人处理。只是提醒，不会自动退款 -->
+    <el-alert
+      v-if="escalatedCount > 0 && !escalatedOnly"
+      type="error"
+      :closable="false"
+      show-icon
+      class="banner"
+    >
+      <template #title>
+        有 <strong>{{ escalatedCount }}</strong> 笔售后已超过 {{ escalateDays }} 天未处理，系统每天会推送一次汇总提醒
+      </template>
+      <div class="banner-body">
+        系统不会自动同意，也不会自动退款，需你在这里确认。
+        <el-button link type="primary" @click="showEscalated">只看这些</el-button>
+      </div>
+    </el-alert>
+
     <!-- 状态筛选 + 搜索 -->
     <div class="toolbar">
-      <el-radio-group v-model="status" @change="reload">
+      <el-radio-group v-model="status" :disabled="escalatedOnly" @change="reload">
         <el-radio-button value="ALL">全部</el-radio-button>
         <el-radio-button v-for="s in STATUS_LIST" :key="s.value" :value="s.value">
           {{ s.label }}<span v-if="counts[s.value]" class="count">{{ counts[s.value] }}</span>
         </el-radio-button>
       </el-radio-group>
+      <el-tag v-if="escalatedOnly" type="danger" closable @close="clearEscalated">
+        只看已升级
+      </el-tag>
     </div>
     <div class="toolbar">
       <el-input
@@ -52,10 +72,13 @@
       <el-table-column label="退款金额" width="110">
         <template #default="{ row }">{{ fenToYuan(row.refundAmount) }} 元</template>
       </el-table-column>
-      <el-table-column label="状态" width="130">
+      <el-table-column label="状态" width="150">
         <template #default="{ row }">
           <el-tag :type="statusTag(row.status)">{{ statusText(row.status) }}</el-tag>
-          <div v-if="row.status === 'PENDING' && rowOverdue(row)" class="overdue">
+          <div v-if="row.status === 'PENDING' && rowEscalated(row)" class="escalated">
+            已升级，{{ daysPending(row.createdAt) }} 天未处理
+          </div>
+          <div v-else-if="row.status === 'PENDING' && rowOverdue(row)" class="overdue">
             已超时，待你确认
           </div>
         </template>
@@ -98,7 +121,14 @@
           <el-descriptions-item label="售后单号">{{ detail.afterSaleNo }}</el-descriptions-item>
           <el-descriptions-item label="状态">
             <el-tag :type="statusTag(detail.status)">{{ statusText(detail.status) }}</el-tag>
-            <el-tag v-if="detail.status === 'PENDING' && rowOverdue(detail)" type="danger" class="ml">
+            <el-tag v-if="detail.status === 'PENDING' && rowEscalated(detail)" type="danger" class="ml">
+              已升级
+            </el-tag>
+            <el-tag
+              v-else-if="detail.status === 'PENDING' && rowOverdue(detail)"
+              type="warning"
+              class="ml"
+            >
               已超时
             </el-tag>
           </el-descriptions-item>
@@ -267,6 +297,12 @@ const reviewHours = ref(48);
 const returnDays = ref(7);
 /** 待处理中已超时的笔数（仅提醒，不会自动退款） */
 const overdueCount = ref(0);
+/** 已升级（超过升级阈值仍待处理）的笔数 */
+const escalatedCount = ref(0);
+/** 升级阈值（天），0 表示不升级 */
+const escalateDays = ref(3);
+/** 是否只看已升级 */
+const escalatedOnly = ref(false);
 /** 后端是否开启了「超时自动同意退款」，默认 false；开启时界面要显眼告警 */
 const autoApprove = ref(false);
 
@@ -280,14 +316,38 @@ function rowOverdue(row: AfterSaleRow): boolean {
   return Date.now() - new Date(row.createdAt).getTime() > reviewHours.value * 60 * 60 * 1000;
 }
 
+/** 是否已升级（拖过按天计的阈值）。同样是纯提醒语义 */
+function rowEscalated(row: AfterSaleRow): boolean {
+  if (escalateDays.value <= 0) return false;
+  if (typeof row.escalated === 'boolean') return row.escalated;
+  return Date.now() - new Date(row.createdAt).getTime() > escalateDays.value * 24 * 60 * 60 * 1000;
+}
+
+/** 已挂多少天（向下取整） */
+function daysPending(createdAt: string): number {
+  return Math.floor((Date.now() - new Date(createdAt).getTime()) / (24 * 60 * 60 * 1000));
+}
+
+function showEscalated() {
+  escalatedOnly.value = true;
+  status.value = 'ALL';
+  reload();
+}
+
+function clearEscalated() {
+  escalatedOnly.value = false;
+  reload();
+}
+
 async function load() {
   loading.value = true;
   try {
     const data = await adminListAfterSales({
       page: page.value,
       size: size.value,
-      status: status.value === 'ALL' ? undefined : status.value,
+      status: escalatedOnly.value || status.value === 'ALL' ? undefined : status.value,
       keyword: keyword.value.trim() || undefined,
+      escalatedOnly: escalatedOnly.value || undefined,
     });
     rows.value = data.list;
     total.value = data.total;
@@ -295,6 +355,8 @@ async function load() {
     reviewHours.value = data.reviewHours ?? 48;
     returnDays.value = data.returnDays ?? 7;
     overdueCount.value = data.overdueCount ?? 0;
+    escalatedCount.value = data.escalatedCount ?? 0;
+    escalateDays.value = data.escalateDays ?? 3;
     autoApprove.value = data.autoApprove ?? false;
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '加载失败');
@@ -437,6 +499,13 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.banner {
+  margin-bottom: 12px;
+}
+.banner-body {
+  margin-top: 2px;
+  font-size: 12px;
+}
 .toolbar {
   display: flex;
   gap: 12px;
@@ -454,6 +523,12 @@ onMounted(() => {
 .overdue {
   color: #f56c6c;
   font-size: 12px;
+  margin-top: 2px;
+}
+.escalated {
+  color: #f56c6c;
+  font-size: 12px;
+  font-weight: 600;
   margin-top: 2px;
 }
 .ml {

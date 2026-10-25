@@ -23,6 +23,11 @@ adminAfterSalesRouter.get('/', validate({
       .optional(),
     // 售后单号 / 订单号 模糊搜索
     keyword: z.string().trim().max(32).optional(),
+    // 只看「已升级」（超过升级阈值仍待处理）的单
+    escalatedOnly: z
+      .union([z.literal('1'), z.literal('0'), z.literal('true'), z.literal('false')])
+      .transform((v) => v === '1' || v === 'true')
+      .optional(),
     page: z.coerce.number().int().positive().optional(),
     size: z.coerce.number().int().positive().optional(),
   }),

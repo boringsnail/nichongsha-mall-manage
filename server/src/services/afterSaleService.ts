@@ -144,6 +144,12 @@ export function toAfterSaleView(
     // 待处理且已超过商家处理时限：只用于界面标红提醒。
     // 状态仍然是 PENDING，不会自动同意、更不会自动退款。
     overdue: row.status === 'PENDING' && row.createdAt.getTime() <= afterSaleReviewDeadline().getTime(),
+    // 超过「升级阈值」（默认 3 天）仍无人处理：升级为顶部横幅 + 每日外发提醒。
+    // 同样只是提醒，不改变状态、不动资金。
+    escalated:
+      row.status === 'PENDING' &&
+      afterSaleEscalateDays() > 0 &&
+      row.createdAt.getTime() <= afterSaleEscalateDeadline().getTime(),
     ...extra,
   };
 }
@@ -346,23 +352,29 @@ export async function submitReturnTracking(
 export async function listAdminAfterSales(query: {
   status?: string;
   keyword?: string;
+  /** 只看「已升级」（超过升级阈值仍待处理）的单 */
+  escalatedOnly?: boolean;
   page?: number;
   size?: number;
 }) {
   const page = Math.max(1, query.page ?? 1);
   const size = Math.min(50, Math.max(1, query.size ?? 20));
   const keyword = query.keyword?.trim();
-  const where = {
-    ...(query.status ? { status: query.status as never } : {}),
-    // 商家最常用的两个检索入口：售后单号、订单号。都是精确/前缀可命中的短串，
-    // 用 contains 足够，不必上全文索引。
-    ...(keyword ? { OR: [{ afterSaleNo: { contains: keyword } }, { orderNo: { contains: keyword } }] } : {}),
-  };
-  const [total, rows, grouped, overdueCount] = await Promise.all([
+  const escalatedWhere = { status: 'PENDING' as const, createdAt: { lte: afterSaleEscalateDeadline() } };
+  const where = query.escalatedOnly
+    ? { ...escalatedWhere }
+    : {
+        ...(query.status ? { status: query.status as never } : {}),
+        // 商家最常用的两个检索入口：售后单号、订单号。都是精确/前缀可命中的短串，
+        // 用 contains 足够，不必上全文索引。
+        ...(keyword ? { OR: [{ afterSaleNo: { contains: keyword } }, { orderNo: { contains: keyword } }] } : {}),
+      };
+  const [total, rows, grouped, overdueCount, escalatedCount] = await Promise.all([
     prisma.afterSale.count({ where }),
     prisma.afterSale.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      // 升级筛选下按最早申请排（谁拖得最久谁在最前），其余按时间倒序
+      orderBy: { createdAt: query.escalatedOnly ? 'asc' : 'desc' },
       skip: (page - 1) * size,
       take: size,
       include: { order: { include: { items: true, user: true } } },
@@ -372,6 +384,8 @@ export async function listAdminAfterSales(query: {
     prisma.afterSale.groupBy({ by: ['status'], _count: { _all: true } }),
     // 待处理里已超时的笔数（全量口径）：超时只是提醒，不会自动退款
     prisma.afterSale.count({ where: { status: 'PENDING', createdAt: { lte: afterSaleReviewDeadline() } } }),
+    // 已升级的笔数（超过升级阈值仍待处理），用于顶部横幅与侧栏红点
+    prisma.afterSale.count({ where: escalatedWhere }),
   ]);
   return {
     list: rows.map((r) =>
@@ -395,6 +409,10 @@ export async function listAdminAfterSales(query: {
     counts: Object.fromEntries(grouped.map((g) => [g.status, g._count._all])) as Record<string, number>,
     /** 待处理里已经超时的笔数（只提醒，不会自动退款） */
     overdueCount,
+    /** 已升级（超过升级阈值仍待处理）的笔数 */
+    escalatedCount,
+    /** 升级阈值（天），0 表示不升级 */
+    escalateDays: afterSaleEscalateDays(),
     // 把规则带回前端，管控台才能准确显示倒计时，
     // 而不是在界面上硬编码 48 小时（实际由环境变量控制）
     reviewHours: afterSaleReviewHours(),
@@ -598,6 +616,93 @@ export function afterSaleAutoApprove(): boolean {
 /** 待处理「已超时」的判定线：早于这个时间创建的 PENDING 即为超时 */
 export function afterSaleReviewDeadline(): Date {
   return new Date(Date.now() - afterSaleReviewHours() * 60 * 60 * 1000);
+}
+
+/**
+ * 「升级提醒」阈值（天），默认 3；设为 0 表示不升级。
+ * 环境变量 AFTER_SALE_ESCALATE_DAYS
+ *
+ * 超时（小时级）只是列表里标红；再拖到按天计，说明确实没人管，
+ * 这时升级成顶部横幅 + 每日一次外发提醒。依然**不会**自动退款。
+ */
+export function afterSaleEscalateDays(): number {
+  const n = Number(process.env.AFTER_SALE_ESCALATE_DAYS ?? 3);
+  return Number.isFinite(n) && n >= 0 ? n : 3;
+}
+
+/** 待处理「已升级」的判定线 */
+export function afterSaleEscalateDeadline(): Date {
+  return new Date(Date.now() - afterSaleEscalateDays() * 24 * 60 * 60 * 1000);
+}
+
+/** 每日提醒的触发时刻（业务时区的小时数），默认 9 点。环境变量 AFTER_SALE_ALERT_HOUR */
+function afterSaleAlertHour(): number {
+  const n = Number(process.env.AFTER_SALE_ALERT_HOUR ?? 9);
+  return Number.isFinite(n) && n >= 0 && n <= 23 ? n : 9;
+}
+
+/** 业务时区偏移（分钟），复用 STATS_TZ_OFFSET，默认 +08:00 */
+function bizOffsetMinutes(): number {
+  const raw = (process.env.STATS_TZ_OFFSET ?? '+08:00').trim();
+  const m = /^([+-])(\d{2}):(\d{2})$/.exec(raw);
+  if (!m) return 480;
+  const sign = m[1] === '-' ? -1 : 1;
+  return sign * (Number(m[2]) * 60 + Number(m[3]));
+}
+
+// 每日提醒去重：同一天只推一次，避免 10 分钟一轮的定时任务刷屏
+let lastAlertDay = '';
+
+/**
+ * 每日一次「超时未处理」汇总提醒。
+ *
+ * 设计取舍：
+ *  - 只统计 PENDING 且已超过升级阈值的单，按最早申请排序，最多列 20 条；
+ *  - 一天只推一次（业务时区），没有待升级的单就不推；
+ *  - 未配置 webhook 时退化为日志，不影响任何业务逻辑；
+ *  - **任何情况下都不改售后状态、不发起退款**。
+ */
+export async function alertOverdueAfterSales(): Promise<boolean> {
+  const days = afterSaleEscalateDays();
+  if (days <= 0) return false;
+
+  const local = new Date(Date.now() + bizOffsetMinutes() * 60_000);
+  const day = local.toISOString().slice(0, 10);
+  if (local.getUTCHours() < afterSaleAlertHour()) return false;
+  if (lastAlertDay === day) return false;
+
+  const where = { status: 'PENDING' as const, createdAt: { lte: afterSaleEscalateDeadline() } };
+  const [total, rows] = await Promise.all([
+    prisma.afterSale.count({ where }),
+    prisma.afterSale.findMany({
+      where,
+      orderBy: { createdAt: 'asc' },
+      take: 20,
+      select: { afterSaleNo: true, orderNo: true, type: true, refundAmount: true, createdAt: true },
+    }),
+  ]);
+
+  // 没有待升级的单：记为今天已处理，省掉后续几轮查询
+  if (!total) {
+    lastAlertDay = day;
+    return false;
+  }
+
+  const dayMs = 24 * 60 * 60 * 1000;
+  const lines = rows.map((r) => {
+    const hours = Math.floor((Date.now() - r.createdAt.getTime()) / (60 * 60 * 1000));
+    const amount = (r.refundAmount / 100).toFixed(2);
+    const type = r.type === 'REFUND_ONLY' ? '仅退款' : '退货退款';
+    return `· ${r.afterSaleNo} / 订单 ${r.orderNo} / ${type} ¥${amount} / 已挂 ${Math.floor(hours / 24)} 天${hours % 24} 小时`;
+  });
+  if (total > rows.length) lines.push(`……另有 ${total - rows.length} 笔未列出`);
+  lines.push('请登录管控台「售后管理」处理。系统不会自动同意，也不会自动退款。');
+
+  const { pushAlert } = await import('./notify.js');
+  const ok = await pushAlert(`【你宠啥】${total} 笔售后超过 ${days} 天未处理`, lines);
+  lastAlertDay = day;
+  if (!ok) console.warn(`[after-sale] 今日升级提醒已降级为日志输出（webhook 未配置或发送失败）`);
+  return ok;
 }
 
 // 超时提醒日志：定时任务 10 分钟一轮，别把日志刷爆，一小时最多提示一次
