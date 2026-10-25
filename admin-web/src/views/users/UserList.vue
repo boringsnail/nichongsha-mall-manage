@@ -1,131 +1,222 @@
 <template>
-  <div class="user-list-page">
-    <a-card :bordered="false">
-      <template #title>用户管理</template>
-      <a-space style="margin-bottom: 16px">
-        <a-input-search v-model="searchText" placeholder="搜索用户名/手机号" @search="fetchUsers" style="width: 250px" />
-        <a-button type="primary" @click="fetchUsers">刷新</a-button>
-      </a-space>
-      <a-table :data="users" :loading="loading" :pagination="pagination" @page-change="onPageChange">
-        <template #columns>
-          <a-table-column title="ID" data-field="id" />
-          <a-table-column title="用户名" data-field="username" />
-          <a-table-column title="手机号" data-field="phone" />
-          <a-table-column title="累计消费" data-field="totalSpent" :formatter="(row: any) => `¥${row.totalSpent.toFixed(2)}`" />
-          <a-table-column title="订单数" data-field="orderCount" />
-          <a-table-column title="注册时间" data-field="createdAt" :formatter="(row: any) => formatDate(row.createdAt)" />
-          <a-table-column title="操作" :width="120">
-            <template #body="{ row }: any" >
-              <a-button size="small" type="primary" @click="viewDetail(row)">详情</a-button>
-            </template>
-          </a-table-column>
-        </template>
-      </a-table>
-    </a-card>
+  <div>
+    <div class="toolbar">
+      <el-input
+        v-model="keyword"
+        placeholder="搜索昵称 / 手机号 / openid"
+        style="width: 260px"
+        clearable
+        @keyup.enter="reload"
+        @clear="reload"
+      />
+      <el-select v-model="sort" style="width: 150px" @change="reload">
+        <el-option label="按注册时间" value="recent" />
+        <el-option label="按消费额" value="spend" />
+      </el-select>
+      <el-button type="primary" @click="reload">查询</el-button>
+    </div>
 
-    <!-- 详情弹窗 -->
-    <a-modal v-model:visible="detailVisible" title="用户详情" width="700px">
-      <template #footer>
-        <a-button @click="detailVisible = false">关闭</a-button>
-      </template>
-      <div v-if="currentUser" class="user-detail">
-        <a-descriptions :column="2" bordered>
-          <a-descriptions-item label="ID">{{ currentUser.id }}</a-descriptions-item>
-          <a-descriptions-item label="用户名">{{ currentUser.username }}</a-descriptions-item>
-          <a-descriptions-item label="手机号">{{ currentUser.phone }}</a-descriptions-item>
-          <a-descriptions-item label="邮箱">{{ currentUser.email || '未填写' }}</a-descriptions-item>
-          <a-descriptions-item label="累计消费">¥{{ currentUser.totalSpent.toFixed(2) }}</a-descriptions-item>
-          <a-descriptions-item label="订单数">{{ currentUser.orderCount }}</a-descriptions-item>
-          <a-descriptions-item label="注册时间">{{ formatDate(currentUser.createdAt) }}</a-descriptions-item>
-          <a-descriptions-item label="最近登录">{{ formatDate(currentUser.lastLoginAt) }}</a-descriptions-item>
-        </a-descriptions>
-        <a-divider>最近订单</a-divider>
-        <a-table :data="currentUser.recentOrders" :bordered="true" size="small" v-if="currentUser.recentOrders.length">
-          <template #columns>
-            <a-table-column title="订单号" data-field="orderNo" />
-            <a-table-column title="金额" data-field="totalAmount" :formatter="(row: any) => `¥${row.totalAmount.toFixed(2)}`" />
-            <a-table-column title="状态" data-field="status" />
-            <a-table-column title="下单时间" data-field="createdAt" :formatter="(row: any) => formatDate(row.createdAt)" />
-          </template>
-        </a-table>
-        <a-empty v-else description="暂无订单" />
-        <a-divider>收货地址</a-divider>
-        <a-table :data="currentUser.addresses" :bordered="true" size="small" v-if="currentUser.addresses.length">
-          <template #columns>
-            <a-table-column title="联系人" data-field="name" />
-            <a-table-column title="电话" data-field="phone" />
-            <a-table-column title="地址" data-field="address" />
-          </template>
-        </a-table>
-        <a-empty v-else description="暂无地址" />
+    <el-table v-loading="loading" :data="rows" border stripe>
+      <el-table-column prop="id" label="ID" width="70" />
+      <el-table-column label="用户" min-width="180">
+        <template #default="{ row }">
+          <div class="user-cell">
+            <el-avatar :size="32" :src="row.avatarUrl || undefined">
+              {{ (row.nickname || '微')[0] }}
+            </el-avatar>
+            <div>
+              <div>{{ row.nickname || '微信用户' }}</div>
+              <div class="muted">{{ shortOpenid(row.openid) }}</div>
+            </div>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="手机号" width="130">
+        <template #default="{ row }">{{ row.phone || '-' }}</template>
+      </el-table-column>
+      <el-table-column label="累计消费" width="110">
+        <template #default="{ row }">{{ fenToYuan(row.totalSpent) }}</template>
+      </el-table-column>
+      <el-table-column label="成交单数" width="100">
+        <template #default="{ row }">{{ row.paidOrderCount }} / {{ row.orderCount }}</template>
+      </el-table-column>
+      <el-table-column label="最近成交" width="170">
+        <template #default="{ row }">{{ row.lastPaidAt ? formatTime(row.lastPaidAt) : '-' }}</template>
+      </el-table-column>
+      <el-table-column label="注册时间" width="170">
+        <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+      </el-table-column>
+      <el-table-column label="操作" width="90" fixed="right">
+        <template #default="{ row }">
+          <el-button link type="primary" @click="openDetail(row.id)">详情</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <el-pagination
+      class="pager"
+      layout="total, prev, pager, next"
+      :total="total"
+      :page-size="size"
+      :current-page="page"
+      @current-change="onPage"
+    />
+
+    <el-dialog v-model="detailVisible" title="用户详情" width="760px">
+      <div v-if="detail" v-loading="detailLoading">
+        <el-descriptions :column="3" border size="small">
+          <el-descriptions-item label="用户">
+            {{ detail.nickname || '微信用户' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="手机号">{{ detail.phone || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="注册时间">{{ formatTime(detail.createdAt) }}</el-descriptions-item>
+          <el-descriptions-item label="累计消费">{{ fenToYuan(detail.totalSpent) }} 元</el-descriptions-item>
+          <el-descriptions-item label="成交 / 总单">
+            {{ detail.paidOrderCount }} / {{ detail.orderCount }}
+          </el-descriptions-item>
+          <el-descriptions-item label="客单价">{{ fenToYuan(detail.avgOrderValue) }} 元</el-descriptions-item>
+          <el-descriptions-item label="openid" :span="3">{{ detail.openid }}</el-descriptions-item>
+        </el-descriptions>
+
+        <h4 class="section-title">收货地址（{{ detail.addresses.length }}）</h4>
+        <el-table :data="detail.addresses" border size="small">
+          <el-table-column label="收货人" width="110">
+            <template #default="{ row }">
+              {{ row.receiverName }}
+              <el-tag v-if="row.isDefault" size="small" type="success">默认</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="phone" label="电话" width="130" />
+          <el-table-column label="地址">
+            <template #default="{ row }">
+              {{ row.province }}{{ row.city }}{{ row.district }}{{ row.detail }}
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <h4 class="section-title">最近订单（{{ detail.recentOrders.length }}）</h4>
+        <el-table :data="detail.recentOrders" border size="small">
+          <el-table-column prop="orderNo" label="订单号" width="190" />
+          <el-table-column label="商品" min-width="160">
+            <template #default="{ row }">{{ row.goodsSummary || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="金额" width="100">
+            <template #default="{ row }">{{ fenToYuan(row.totalAmount) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="statusTag(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="下单时间" width="170">
+            <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+          </el-table-column>
+        </el-table>
       </div>
-    </a-modal>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { message } from 'ant-design-vue';
-import axios from 'axios';
+import { onMounted, ref } from 'vue';
+import { ElMessage } from 'element-plus';
+import { adminListUsers, adminGetUser, type AdminUserDetail, type AdminUserRow } from '@/api/users';
+import { fenToYuan } from '@/utils/money';
 
-const users = ref<any[]>([]);
-const loading = ref(false);
-const searchText = ref('');
-const currentPage = ref(1);
-const pageSize = ref(10);
+type TagType = 'success' | 'warning' | 'info' | 'primary' | 'danger';
 
-const pagination = {
-  current: currentPage.value,
-  pageSize: pageSize.value,
-  total: 0,
-  showTotal: (total: number) => `共 ${total} 条`,
+const STATUS_MAP: Record<string, { label: string; tag: TagType }> = {
+  PENDING_PAYMENT: { label: '待支付', tag: 'warning' },
+  PAID: { label: '已支付', tag: 'primary' },
+  SHIPPED: { label: '已发货', tag: 'success' },
+  COMPLETED: { label: '已完成', tag: 'info' },
+  CANCELLED: { label: '已取消', tag: 'danger' },
 };
+const statusText = (s: string) => STATUS_MAP[s]?.label || s;
+const statusTag = (s: string): TagType => STATUS_MAP[s]?.tag || 'info';
+
+const formatTime = (t: string | null) => (t ? new Date(t).toLocaleString('zh-CN', { hour12: false }) : '-');
+const shortOpenid = (o: string) => (o.length > 14 ? `${o.slice(0, 8)}…${o.slice(-4)}` : o);
+
+const loading = ref(false);
+const rows = ref<AdminUserRow[]>([]);
+const keyword = ref('');
+const sort = ref<'recent' | 'spend'>('recent');
+const page = ref(1);
+const size = ref(20);
+const total = ref(0);
 
 const detailVisible = ref(false);
-const currentUser = ref<any>(null);
+const detailLoading = ref(false);
+const detail = ref<AdminUserDetail | null>(null);
 
-const formatDate = (dateStr: string) => {
-  return new Date(dateStr).toLocaleString('zh-CN');
-};
-
-const fetchUsers = async () => {
+async function load() {
   loading.value = true;
   try {
-    const res = await axios.get('/api/admin/users', {
-      params: { page: currentPage.value, pageSize: pageSize.value, keyword: searchText.value },
+    const data = await adminListUsers({
+      keyword: keyword.value.trim() || undefined,
+      sort: sort.value,
+      page: page.value,
+      size: size.value,
     });
-    users.value = res.data.users;
-    pagination.total = res.data.total;
-  } catch (e: any) {
-    message.error(e.response?.data?.error || '获取用户列表失败');
+    rows.value = data.list;
+    total.value = data.total;
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '加载失败');
   } finally {
     loading.value = false;
   }
-};
+}
 
-const onPageChange = (page: number) => {
-  currentPage.value = page;
-  fetchUsers();
-};
+function reload() {
+  page.value = 1;
+  load();
+}
 
-const viewDetail = async (user: any) => {
+function onPage(p: number) {
+  page.value = p;
+  load();
+}
+
+async function openDetail(id: number) {
+  detailVisible.value = true;
+  detailLoading.value = true;
+  detail.value = null;
   try {
-    const res = await axios.get(`/api/admin/users/${user.id}`);
-    currentUser.value = res.data;
-    detailVisible.value = true;
-  } catch (e: any) {
-    message.error(e.response?.data?.error || '获取用户详情失败');
+    detail.value = await adminGetUser(id);
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '加载失败');
+  } finally {
+    detailLoading.value = false;
   }
-};
+}
 
-onMounted(() => {
-  fetchUsers();
-});
+onMounted(load);
 </script>
 
 <style scoped>
-.user-detail {
-  max-height: 600px;
-  overflow-y: auto;
+.toolbar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.pager {
+  margin-top: 16px;
+  justify-content: flex-end;
+}
+.user-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.muted {
+  color: #999;
+  font-size: 12px;
+}
+.section-title {
+  margin: 20px 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
 }
 </style>
