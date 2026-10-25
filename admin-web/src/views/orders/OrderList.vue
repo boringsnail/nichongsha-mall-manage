@@ -127,6 +127,18 @@ const statusOptions: { label: string; value: OrderStatus }[] = [
 
 const statusText = (s: OrderStatus) => statusOptions.find((o) => o.value === s)?.label || s;
 
+/** 微信侧 order_state 文案（1待发货 2已发货 3确认收货 4交易完成 5已退款 6已关闭） */
+const WX_STATE_TEXT: Record<number, string> = {
+  1: '待发货',
+  2: '已发货',
+  3: '已确认收货',
+  4: '交易完成',
+  5: '已退款',
+  6: '已关闭',
+};
+const wxStateText = (state: number | null) =>
+  state === null ? '未知状态' : (WX_STATE_TEXT[state] ?? `状态 ${state}`);
+
 type TagType = 'success' | 'warning' | 'info' | 'primary' | 'danger';
 const STATUS_TAG: Record<OrderStatus, TagType> = {
   PENDING_PAYMENT: 'warning',
@@ -185,8 +197,18 @@ async function syncAll() {
 async function syncOne(orderNo: string) {
   try {
     const r = await adminSyncOrderFromWechat(orderNo);
-    if (r.changed) ElMessage.success(`已同步：${statusText(r.before)} → ${statusText(r.status)}`);
-    else ElMessage.info(`微信侧状态无变化（本地仍为${statusText(r.status)}）`);
+    if (r.changed) {
+      ElMessage.success(`已同步：${statusText(r.before)} → ${statusText(r.status)}`);
+    } else if (r.wxState && !r.wxState.ok) {
+      // 拉取失败时把微信返回的原因直接摆出来，别让用户以为按钮坏了
+      ElMessage.warning(`拉取微信状态失败：${r.wxState.error ?? '未知原因'}`);
+    } else if (r.wxState) {
+      ElMessage.info(
+        `微信侧为「${wxStateText(r.wxState.orderState)}」，本地仍为${statusText(r.status)}`,
+      );
+    } else {
+      ElMessage.info(`状态无变化（本地仍为${statusText(r.status)}）`);
+    }
     await load();
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '同步失败');

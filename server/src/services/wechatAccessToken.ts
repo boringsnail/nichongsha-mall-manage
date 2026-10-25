@@ -60,7 +60,9 @@ export async function getAccessToken(forceRefresh = false): Promise<string> {
     }
     if (!data.access_token) {
       console.error(`[wx-token] 获取失败：errcode=${data.errcode} errmsg=${data.errmsg}`);
-      throw new HttpError(502, 'WX_UNAVAILABLE', `获取 access_token 失败：${data.errmsg ?? '未知错误'}`);
+      // 把 errcode 带出来：40164=IP 不在白名单、40125=AppSecret 错误、45009=频率超限，
+      // 运维看到码就能直接定位，不用再猜
+      throw new HttpError(502, 'WX_UNAVAILABLE', `获取 access_token 失败（${data.errcode ?? '?'}）：${data.errmsg ?? '未知错误'}`);
     }
     const ttl = (data.expires_in ?? 7200) * 1000;
     cached = { token: data.access_token, expiresAt: Date.now() + Math.max(ttl - EARLY_REFRESH_MS, 60_000) };

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { validate } from '../middleware/validate.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { listAdminOrders, getAdminOrderDetail, shipOrder, syncAdminOrderFromWechat, syncAdminOrdersFromWechat } from '../services/adminOrderService.js';
+import { diagnoseWechatOrder } from '../services/shippingService.js';
 
 export const adminOrdersRouter = Router();
 
@@ -41,5 +42,15 @@ adminOrdersRouter.post(
   validate({ params: z.object({ orderNo: z.string().regex(/^NPA\d{16}$/) }) }),
   asyncHandler(async (req, res) => {
     res.json({ code: 0, data: await syncAdminOrderFromWechat(req.params.orderNo) });
+  }),
+);
+
+// 微信接口自检：逐段暴露 appid/secret/mchid 是否配好、能否拿到 access_token、
+// get_order 的真实返回。排障用，只读且不含密钥。
+adminOrdersRouter.get(
+  '/:orderNo/wx-diagnose',
+  validate({ params: z.object({ orderNo: z.string().regex(/^NPA\d{16}$/) }) }),
+  asyncHandler(async (req, res) => {
+    res.json({ code: 0, data: await diagnoseWechatOrder(req.params.orderNo) });
   }),
 );

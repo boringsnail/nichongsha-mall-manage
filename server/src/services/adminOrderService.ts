@@ -1,6 +1,7 @@
 import { prisma } from '../db.js';
 import { notFound, orderIllegal } from '../utils/HttpError.js';
 import { syncFulfillmentQuietly } from './orderService.js';
+import { getWechatOrderState } from './shippingService.js';
 
 export async function listAdminOrders(query: { status?: string; page?: number; size?: number }) {
   const page = Math.max(1, query.page ?? 1);
@@ -112,6 +113,11 @@ export async function syncAdminOrderFromWechat(orderNo: string) {
 
   const changed = await syncFulfillmentQuietly(orderNo, { force: true });
   const latest = await prisma.order.findUniqueOrThrow({ where: { orderNo } });
+
+  // 没变化时把微信侧的原始状态带回去：否则用户点完按钮只看到「还是待发货」，
+  // 分不清是「微信那边也还没发货」还是「我们这边拉取失败了」
+  const wx = changed ? null : await getWechatOrderState(orderNo);
+
   return {
     orderNo,
     changed,
@@ -120,6 +126,9 @@ export async function syncAdminOrderFromWechat(orderNo: string) {
     shippedAt: latest.shippedAt,
     logisticsCompany: latest.logisticsCompany,
     trackingNo: latest.trackingNo,
+    wxState: wx
+      ? { ok: wx.ok, orderState: wx.orderState ?? null, trackingNo: wx.trackingNo ?? null, error: wx.error ?? null }
+      : null,
   };
 }
 

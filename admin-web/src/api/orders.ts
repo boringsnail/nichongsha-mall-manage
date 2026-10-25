@@ -51,6 +51,13 @@ export interface WxSyncResult {
   shippedAt: string | null;
   logisticsCompany: string | null;
   trackingNo: string | null;
+  /** 本地无变化时附带微信侧原始状态，用于区分「微信还没发货」与「拉取失败」 */
+  wxState: {
+    ok: boolean;
+    orderState: number | null;
+    trackingNo: string | null;
+    error: string | null;
+  } | null;
 }
 
 export interface WxSyncBatchResult {

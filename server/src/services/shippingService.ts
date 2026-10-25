@@ -229,3 +229,40 @@ export async function getWechatOrderState(orderNo: string): Promise<WechatOrderI
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
+
+export interface WxDiagnoseResult {
+  appidConfigured: boolean;
+  secretConfigured: boolean;
+  mchid: string | null;
+  token: { ok: boolean; error?: string };
+  order: WechatOrderInfo;
+}
+
+/**
+ * 微信接口自检。
+ *
+ * 线上排障时最痛的是「同步点了没反应」——既看不到 token 是否拿到，也看不到
+ * get_order 返回了什么。这个接口把链路逐段暴露出来（全部只读，不含密钥）：
+ *   1. 三个关键环境变量是否配好
+ *   2. 能不能拿到 access_token（拿不到会把 errcode 带回来）
+ *   3. get_order 的真实返回
+ */
+export async function diagnoseWechatOrder(orderNo: string): Promise<WxDiagnoseResult> {
+  const mchid = env.pay.direct.mchid || env.pay.subMchId || null;
+
+  let token: { ok: boolean; error?: string };
+  try {
+    await getAccessToken();
+    token = { ok: true };
+  } catch (error) {
+    token = { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+
+  return {
+    appidConfigured: Boolean(env.wxAppid),
+    secretConfigured: Boolean(env.wxSecret),
+    mchid,
+    token,
+    order: await getWechatOrderState(orderNo),
+  };
+}
