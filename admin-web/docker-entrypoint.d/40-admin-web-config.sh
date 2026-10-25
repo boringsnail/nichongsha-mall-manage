@@ -40,6 +40,9 @@ server {
         proxy_pass ${API_UPSTREAM};
         proxy_http_version 1.1;
         proxy_set_header Host \$proxy_host;
+        # 保留浏览器访问的原始域名：后端据此判断「同源请求」，无需把每个前端域名
+        # 都写进 ADMIN_ORIGINS（Host 已被改写成后端域名，仅凭 Host 判不出来）
+        proxy_set_header X-Forwarded-Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
