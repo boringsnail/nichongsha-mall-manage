@@ -21,11 +21,34 @@
 
 const WX_HOST = 'api.weixin.qq.com';
 
-/** 说明当前是否已降级到 HTTP，排障时可从日志看出走了哪条链路 */
+/** 是否已从 HTTPS 降级为 HTTP */
 let httpFallback = false;
+
+/** 是否处于「云调用免鉴权」模式：由容器内旁加载的开放接口服务自动注入鉴权 */
+let cloudCall = false;
 
 export function isUsingHttpFallback(): boolean {
   return httpFallback;
+}
+
+export function isCloudCallMode(): boolean {
+  return cloudCall;
+}
+
+/**
+ * 进入云调用免鉴权模式。
+ *
+ * 触发条件：容器内拿不到 access_token（云托管的开放接口服务接管了鉴权，
+ * 自己换 token 这条路走不通）。此后请求一律走 HTTP 且不再拼 access_token，
+ * 由旁加载的代理补上 cloudbase_access_token。
+ */
+export function enableCloudCallMode(reason: string): void {
+  if (cloudCall) return;
+  cloudCall = true;
+  httpFallback = true;
+  console.warn(
+    `[wx-http] 切换为云调用免鉴权模式（${reason}）：后续请求走 http://${WX_HOST}，不再携带 access_token`,
+  );
 }
 
 /** 这些错误码/文案都表示「TLS 握手阶段不信任对端证书」，与业务无关 */
@@ -67,4 +90,11 @@ export async function wxFetch(pathWithQuery: string, init: RequestInit = {}): Pr
     }
     throw error;
   }
+}
+
+/** 给路径拼上 access_token；token 为 null（云调用模式）时原样返回 */
+export function withAccessToken(path: string, token: string | null): string {
+  if (!token) return path;
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}access_token=${encodeURIComponent(token)}`;
 }

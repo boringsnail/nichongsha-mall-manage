@@ -49,25 +49,36 @@ export async function getAccessToken(forceRefresh = false): Promise<string> {
   const task = (async () => {
     const path = '/cgi-bin/stable_token';
     let data: { access_token?: string; expires_in?: number; errcode?: number; errmsg?: string };
+    let httpStatus = 0;
+    let rawBody = '';
     try {
       const res = await wxFetch(path, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ grant_type: 'client_credential', appid, secret, force_refresh: forceRefresh }),
       });
-      data = (await res.json()) as typeof data;
+      httpStatus = res.status;
+      rawBody = await res.text();
+      data = JSON.parse(rawBody) as typeof data;
     } catch (error) {
       const reason = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-      console.error('[wx-token] 获取 access_token 网络层失败:', reason);
-      // 把底层原因带出去（ENOTFOUND / EAI_AGAIN / ETIMEDOUT / UND_ERR_CONNECT_TIMEOUT…），
-      // 否则线上只看到「微信接口不可用」，无法区分 DNS、出网、TLS 哪一段挂了
-      throw new HttpError(502, 'WX_UNAVAILABLE', `微信接口不可用：${reason}`);
+      console.error('[wx-token] 获取 access_token 失败:', reason, rawBody.slice(0, 200));
+      // 把底层原因带出去（ENOTFOUND / EAI_AGAIN / ETIMEDOUT / 非 JSON 响应…），
+      // 否则线上只看到「微信接口不可用」，无法区分 DNS、出网、TLS、代理哪一段挂了
+      const detail = rawBody ? `，响应片段：${rawBody.slice(0, 120)}` : '';
+      throw new HttpError(502, 'WX_UNAVAILABLE', `微信接口不可用：${reason}（HTTP ${httpStatus}）${detail}`);
     }
     if (!data.access_token) {
-      console.error(`[wx-token] 获取失败：errcode=${data.errcode} errmsg=${data.errmsg}`);
+      console.error(`[wx-token] 获取失败：errcode=${data.errcode} errmsg=${data.errmsg} body=${rawBody.slice(0, 200)}`);
       // 把 errcode 带出来：40164=IP 不在白名单、40125=AppSecret 错误、45009=频率超限，
       // 运维看到码就能直接定位，不用再猜
-      throw new HttpError(502, 'WX_UNAVAILABLE', `获取 access_token 失败（${data.errcode ?? '?'}）：${data.errmsg ?? '未知错误'}`);
+      throw new HttpError(
+        502,
+        'WX_UNAVAILABLE',
+        `获取 access_token 失败（HTTP ${httpStatus}，errcode=${data.errcode ?? '无'}）：${
+          data.errmsg ?? rawBody.slice(0, 120) ?? '未知错误'
+        }`,
+      );
     }
     const ttl = (data.expires_in ?? 7200) * 1000;
     cached = { token: data.access_token, expiresAt: Date.now() + Math.max(ttl - EARLY_REFRESH_MS, 60_000) };

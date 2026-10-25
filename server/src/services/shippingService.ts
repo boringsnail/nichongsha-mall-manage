@@ -1,7 +1,13 @@
 import { prisma } from '../db.js';
 import { env } from '../config/env.js';
 import { getAccessToken } from './wechatAccessToken.js';
-import { wxFetch, isUsingHttpFallback } from './wechatHttp.js';
+import {
+  wxFetch,
+  withAccessToken,
+  isUsingHttpFallback,
+  isCloudCallMode,
+  enableCloudCallMode,
+} from './wechatHttp.js';
 
 // 订单发货管理（微信「发货信息管理」）
 // 背景：小程序提供**实物交易服务**时，微信要求接入订单发货管理并上传发货信息，
@@ -52,34 +58,54 @@ export interface ShippingUploadResult {
 /** access_token 失效类错误码：40001 凭据无效 / 40014 不合法 / 42001 已过期 */
 const TOKEN_INVALID_ERRCODES = new Set([40001, 40014, 42001]);
 
+/** 发一次请求并解析 JSON；非 JSON 响应（云调用代理报错时常见）要保留原文便于定位 */
+async function sendOnce<T>(apiPath: string, payload: unknown, token: string | null): Promise<T> {
+  const res = await wxFetch(withAccessToken(apiPath, token), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`微信接口返回非 JSON（HTTP ${res.status}）：${text.slice(0, 120)}`);
+  }
+}
+
 /**
- * 调用微信开放接口并自动处理 token 失效：首次失败且是 token 类错误时，
- * 强制刷新 access_token 后重试一次。
+ * 调用微信开放接口。三级兜底，覆盖三种运行环境：
  *
- * 为什么需要：token 是全局唯一的，同 AppID 的其他服务（C 端后端）刷新后，
- * 本服务缓存的 token 会立刻失效；不重试就会出现「偶发、间歇」的状态不同步。
+ *   1. 云调用免鉴权（微信云托管）：容器内由「开放接口服务」注入鉴权，不自己换 token；
+ *   2. 自建 token（本地开发 / 非云托管）：走 stable_token，HTTPS；
+ *   3. token 被同 AppID 的其他服务顶掉（40001/40014/42001）：强制刷新后重试一次。
  */
 async function postWx<T extends { errcode?: number; errmsg?: string }>(
   apiPath: string,
   payload: unknown,
 ): Promise<T> {
-  let last: T | undefined;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const token = await getAccessToken(attempt > 0);
-    const res = await wxFetch(`${apiPath}?access_token=${encodeURIComponent(token)}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const data = (await res.json()) as T;
-    last = data;
-    if (attempt === 0 && TOKEN_INVALID_ERRCODES.has(Number(data.errcode))) {
-      console.warn(`[wx] ${apiPath} access_token 失效（errcode=${data.errcode}），强制刷新后重试`);
-      continue;
-    }
-    return data;
+  if (isCloudCallMode()) return sendOnce<T>(apiPath, payload, null);
+
+  let token: string;
+  try {
+    token = await getAccessToken();
+  } catch (error) {
+    // 拿不到 token 基本就是「容器内云调用接管了鉴权」，直接切免鉴权模式
+    enableCloudCallMode(error instanceof Error ? error.message : String(error));
+    return sendOnce<T>(apiPath, payload, null);
   }
-  return last as T;
+
+  const data = await sendOnce<T>(apiPath, payload, token);
+  if (!TOKEN_INVALID_ERRCODES.has(Number(data.errcode))) return data;
+
+  console.warn(`[wx] ${apiPath} access_token 失效（errcode=${data.errcode}），强制刷新后重试`);
+  try {
+    const fresh = await getAccessToken(true);
+    return await sendOnce<T>(apiPath, payload, fresh);
+  } catch (error) {
+    enableCloudCallMode(error instanceof Error ? error.message : String(error));
+    return sendOnce<T>(apiPath, payload, null);
+  }
 }
 
 /** 发货信息上报：把商家填写的物流信息上传微信（幂等友好：重复上报同单号微信会接受） */
@@ -146,13 +172,11 @@ export async function uploadShippingInfo(orderNo: string): Promise<ShippingUploa
 export async function isTradeManaged(): Promise<boolean | null> {
   if (!env.wxAppid || !env.wxSecret) return null;
   try {
-    const token = await getAccessToken();
-    const res = await wxFetch(`/wxa/sec/order/is_trade_managed?access_token=${encodeURIComponent(token)}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    const data = (await res.json()) as { errcode?: number; is_trade_managed?: boolean };
+    // 云调用模式下无需 access_token；自建模式下走 stable_token
+    const data = await postWx<{ errcode?: number; is_trade_managed?: boolean }>(
+      '/wxa/sec/order/is_trade_managed',
+      {},
+    );
     return data.errcode === 0 ? Boolean(data.is_trade_managed) : null;
   } catch {
     return null;
@@ -238,6 +262,8 @@ export interface WxDiagnoseResult {
   mchid: string | null;
   /** 小程序开放接口是否已降级为 HTTP（云托管云调用链路的正常表现） */
   wxHttpFallback: boolean;
+  /** 是否处于云调用免鉴权模式（容器内由开放接口服务注入鉴权，无需 access_token） */
+  cloudCallMode: boolean;
   /** 出网探测：容器能不能连上微信的各个域名（DNS + TCP + TLS 一起验） */
   network: { host: string; ok: boolean; detail: string }[];
   token: { ok: boolean; error?: string };
@@ -304,6 +330,7 @@ export async function diagnoseWechatOrder(orderNo: string): Promise<WxDiagnoseRe
     secretConfigured: Boolean(env.wxSecret),
     mchid,
     wxHttpFallback: isUsingHttpFallback(),
+    cloudCallMode: isCloudCallMode(),
     network: await probeHosts(),
     token,
     order: await getWechatOrderState(orderNo),
