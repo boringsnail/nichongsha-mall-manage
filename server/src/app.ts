@@ -2,6 +2,8 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
+import { HttpError } from './utils/HttpError.js';
+import { isAllowedOrigin, parseOrigins } from './utils/origins.js';
 import { requireAuth } from './middleware/auth.js';
 import { authRouter, adminAuthRouter } from './routes/auth.js';
 import { userRouter } from './routes/user.js';
@@ -21,25 +23,35 @@ import { payRouter } from './routes/pay.js';
 
 export function createApp() {
   const app = express();
-  // 允许 admin-web 和小程序后端通信；上线前将 ADMIN_ORIGINS 改为实际域名
-  const ADMIN_ORIGINS = process.env.ADMIN_ORIGINS
-    ? process.env.ADMIN_ORIGINS.split(',').map((o) => o.trim())
-    : ['http://localhost:5173'];
-  const MINIPROGRAM_ORIGINS = process.env.MINIPROGRAM_ORIGINS
-    ? process.env.MINIPROGRAM_ORIGINS.split(',').map((o) => o.trim())
-    : [];
+  // ---------- CORS ----------
+  // 历史实现只认 ADMIN_ORIGINS 白名单，生产环境未配置时默认只放行 localhost:5173，
+  // 于是前端一换域名（云托管默认域名、自定义域名、新增前端服务）浏览器请求就会被拦，
+  // 且错误以 500「服务器开小差了」抛出，完全看不出是跨域问题——线上登录失败即由此引起。
+  // 现在改为「白名单 / 同源 / *.wechat.com」三条判定，并在拦截时返回 403 + 明确指引。
+  const ADMIN_ORIGINS = parseOrigins(process.env.ADMIN_ORIGINS) ?? ['http://localhost:5173'];
+  const MINIPROGRAM_ORIGINS = parseOrigins(process.env.MINIPROGRAM_ORIGINS) ?? [];
   const allOrigins = [...ADMIN_ORIGINS, ...MINIPROGRAM_ORIGINS];
-  app.use(cors({
-    origin: allOrigins.length > 0 ? (origin, cb) => {
-      // 小程序请求 origin 为 devtools:// 等，开发期放行
-      if (!origin) return cb(null, true);
-      if (allOrigins.includes(origin) || origin.endsWith('.wechat.com')) return cb(null, true);
-      // 开发期不校验
-      if (process.env.NODE_ENV !== 'production') return cb(null, true);
-      cb(new Error('不允许的跨域请求'));
-    } : true,
-    credentials: true,
-  }));
+
+  app.use(
+    cors((req, cb) => {
+      const origin = req.headers.origin;
+      // origin: true 表示把请求方 Origin 原样回写到 Access-Control-Allow-Origin
+      const allow = { origin: true, credentials: true };
+      // 无 Origin：curl、服务端调用、微信支付回调等，不涉及浏览器同源策略
+      if (!origin) return cb(null, allow);
+      if (isAllowedOrigin(origin, req, allOrigins)) return cb(null, allow);
+      // 开发期不校验（vite 代理 / 局域网真机调试）
+      if (process.env.NODE_ENV !== 'production') return cb(null, allow);
+      // 用 403 而非 500：告诉运维该配什么，而不是一句「服务器开小差了」
+      cb(
+        new HttpError(
+          403,
+          'CORS_DENIED',
+          `不允许的跨域请求：${origin}。请把该域名加入后端环境变量 ADMIN_ORIGINS（逗号分隔），或让前端与后端同域访问`,
+        ),
+      );
+    }),
+  );
   // 商品批量导入可能一次带上千行 JSON，默认 100kb 不够；
   // 同时保留原始报文体：微信支付 APIv3 回调验签必须用未经重新序列化的原始 body。
   app.use(
