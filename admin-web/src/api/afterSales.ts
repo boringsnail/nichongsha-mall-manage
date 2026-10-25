@@ -49,6 +49,8 @@ export interface AfterSaleRow {
   rejectedAt: string | null;
   cancelledAt: string | null;
   createdAt: string;
+  /** 待处理且已超过商家处理时限（仅提醒，不会自动退款） */
+  overdue?: boolean;
   /** 订单实付金额（分） */
   orderTotal?: number;
   orderStatus?: string;
@@ -59,10 +61,14 @@ export interface AfterSaleRow {
 export interface AfterSalePage extends Page<AfterSaleRow> {
   /** 各状态数量（全量口径），用于标签页待办数 */
   counts: Partial<Record<AfterSaleStatus, number>>;
-  /** 商家处理时限（小时）：超时自动同意 */
+  /** 待处理中已超时的笔数（仅提醒，不会自动退款） */
+  overdueCount?: number;
+  /** 商家处理提醒时限（小时）：超时只在界面标红，不会自动同意 */
   reviewHours: number;
-  /** 买家寄回时限（天）：超时自动关闭 */
+  /** 买家寄回时限（天）：超时自动关闭；0 表示不自动关闭 */
   returnDays: number;
+  /** 是否开启了「超时自动同意退款」（默认关闭） */
+  autoApprove?: boolean;
 }
 
 export function adminListAfterSales(params: {

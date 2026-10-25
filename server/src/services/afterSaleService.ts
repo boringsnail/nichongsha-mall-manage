@@ -141,6 +141,9 @@ export function toAfterSaleView(
     rejectedAt: row.rejectedAt,
     cancelledAt: row.cancelledAt,
     createdAt: row.createdAt,
+    // 待处理且已超过商家处理时限：只用于界面标红提醒。
+    // 状态仍然是 PENDING，不会自动同意、更不会自动退款。
+    overdue: row.status === 'PENDING' && row.createdAt.getTime() <= afterSaleReviewDeadline().getTime(),
     ...extra,
   };
 }
@@ -355,7 +358,7 @@ export async function listAdminAfterSales(query: {
     // 用 contains 足够，不必上全文索引。
     ...(keyword ? { OR: [{ afterSaleNo: { contains: keyword } }, { orderNo: { contains: keyword } }] } : {}),
   };
-  const [total, rows, grouped] = await Promise.all([
+  const [total, rows, grouped, overdueCount] = await Promise.all([
     prisma.afterSale.count({ where }),
     prisma.afterSale.findMany({
       where,
@@ -367,6 +370,8 @@ export async function listAdminAfterSales(query: {
     // 各状态的总数：标签页上直接显示「待处理 3」，商家一眼知道有没有活要干。
     // 这里刻意不带 where，统计的是全量而非当前筛选结果。
     prisma.afterSale.groupBy({ by: ['status'], _count: { _all: true } }),
+    // 待处理里已超时的笔数（全量口径）：超时只是提醒，不会自动退款
+    prisma.afterSale.count({ where: { status: 'PENDING', createdAt: { lte: afterSaleReviewDeadline() } } }),
   ]);
   return {
     list: rows.map((r) =>
@@ -388,10 +393,14 @@ export async function listAdminAfterSales(query: {
     size,
     /** 各状态数量（全量口径），供管控台标签页显示待办数 */
     counts: Object.fromEntries(grouped.map((g) => [g.status, g._count._all])) as Record<string, number>,
-    // 把「超时自动同意/自动关闭」的规则带回前端，管控台才能准确显示倒计时，
+    /** 待处理里已经超时的笔数（只提醒，不会自动退款） */
+    overdueCount,
+    // 把规则带回前端，管控台才能准确显示倒计时，
     // 而不是在界面上硬编码 48 小时（实际由环境变量控制）
     reviewHours: afterSaleReviewHours(),
     returnDays: afterSaleReturnDays(),
+    /** 是否开启了「超时自动同意退款」（默认关闭） */
+    autoApprove: afterSaleAutoApprove(),
   };
 }
 
@@ -551,62 +560,107 @@ export async function hasActiveAfterSale(orderId: number): Promise<boolean> {
   return n > 0;
 }
 
-// ---------- 超时自动处理（淘宝规则） ----------
+// ---------- 超时处理 ----------
+//
+// 说明（重要）：下面两条规则都是**我们自己的业务规则**，不是微信支付的强制要求。
+// 微信支付 / 小程序订单并没有「商家超时未处理售后即默认同意退款」的条款；
+// 超时自动退款等于不经商家确认就把钱打出去，风险不可控，所以默认关闭。
+//
+// 默认行为：
+//   1. PENDING 超过 AFTER_SALE_REVIEW_HOURS（默认 48 小时）→ 只在管控台标红提醒，
+//      状态保持 PENDING，**不会自动同意，更不会自动退款**，必须由商家点「同意」。
+//   2. WAIT_RETURN 超过 AFTER_SALE_RETURN_DAYS（默认 7 天）买家没寄回 → 自动关闭。
+//      这条不涉及资金，属于保护商家的规则；把天数设为 0 即可关闭。
+//
+// 想恢复淘宝式「超时默认同意」：把 AFTER_SALE_AUTO_APPROVE 设为 1
+// （会真的触发退款，务必确认这是你要的）。
 
-/** 商家处理售后的时限（小时），默认 48。环境变量 AFTER_SALE_REVIEW_HOURS */
+/** 商家处理售后的提醒时限（小时），默认 48。环境变量 AFTER_SALE_REVIEW_HOURS */
 export function afterSaleReviewHours(): number {
   const n = Number(process.env.AFTER_SALE_REVIEW_HOURS ?? 48);
   return Number.isFinite(n) && n > 0 ? n : 48;
 }
 
-/** 买家寄回商品的时限（天），默认 7。环境变量 AFTER_SALE_RETURN_DAYS */
+/** 买家寄回商品的时限（天），默认 7；设为 0 表示不自动关闭。环境变量 AFTER_SALE_RETURN_DAYS */
 export function afterSaleReturnDays(): number {
-  const n = Number(process.env.AFTER_SALE_RETURN_DAYS ?? 7);
-  return Number.isFinite(n) && n > 0 ? n : 7;
+  const raw = process.env.AFTER_SALE_RETURN_DAYS;
+  const n = Number(raw ?? 7);
+  if (!Number.isFinite(n) || n < 0) return 7;
+  return n;
 }
 
+/** 是否允许「超时未处理自动同意退款」，默认关闭。环境变量 AFTER_SALE_AUTO_APPROVE */
+export function afterSaleAutoApprove(): boolean {
+  const v = (process.env.AFTER_SALE_AUTO_APPROVE ?? '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+/** 待处理「已超时」的判定线：早于这个时间创建的 PENDING 即为超时 */
+export function afterSaleReviewDeadline(): Date {
+  return new Date(Date.now() - afterSaleReviewHours() * 60 * 60 * 1000);
+}
+
+// 超时提醒日志：定时任务 10 分钟一轮，别把日志刷爆，一小时最多提示一次
+let lastOverdueLogAt = 0;
+
 /**
- * 售后超时自动流转：
+ * 售后超时流转（定时任务每 10 分钟跑一次）：
  *
- *  1. PENDING 超过 N 小时商家没处理 → 自动同意（淘宝的「超时未处理默认同意」）。
- *     否则用户申请完就石沉大海，只能找客服；而这笔售后会一直挂在「待处理」。
- *  2. WAIT_RETURN 超过 N 天买家没寄回 → 自动关闭（淘宝是「超时未退货，售后关闭」）。
- *     一直不关，用户还能随时补寄，商家永远不知道该不该备货。
- *
- * 自动同意会真的触发退款（仅退款类型），因此这条路径必须同样严谨：
- * 走 approveAfterSale 而不是直接改状态，复用同一套金额校验与幂等退款。
+ *  · PENDING 超时 —— 默认什么都不做（不退款），只按小时打一条提醒日志；
+ *    仅当显式设置 AFTER_SALE_AUTO_APPROVE=1 时才走 approveAfterSale 自动同意。
+ *  · WAIT_RETURN 超时 —— 自动关闭（不涉及资金）。
  */
 export async function autoProgressAfterSales(limit = 50): Promise<number> {
-  const now = Date.now();
-  const reviewDeadline = new Date(now - afterSaleReviewHours() * 60 * 60 * 1000);
-  const returnDeadline = new Date(now - afterSaleReturnDays() * 24 * 60 * 60 * 1000);
-
-  const stale = await prisma.afterSale.findMany({
-    where: {
-      OR: [
-        { status: 'PENDING', createdAt: { lte: reviewDeadline } },
-        { status: 'WAIT_RETURN', agreedAt: { lte: returnDeadline } },
-      ],
-    },
-    select: { afterSaleNo: true, status: true },
-    orderBy: { createdAt: 'asc' },
-    take: limit,
-  });
-
   let handled = 0;
-  for (const row of stale) {
-    try {
-      if (row.status === 'PENDING') {
-        console.log(`[after-sale] 商家超时未处理，自动同意 ${row.afterSaleNo}`);
+
+  // ① 待处理超时
+  if (afterSaleAutoApprove()) {
+    const stale = await prisma.afterSale.findMany({
+      where: { status: 'PENDING', createdAt: { lte: afterSaleReviewDeadline() } },
+      select: { afterSaleNo: true },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+    });
+    for (const row of stale) {
+      try {
+        console.warn(`[after-sale] 已开启超时自动同意，自动同意 ${row.afterSaleNo}`);
         await approveAfterSale(row.afterSaleNo);
         handled += 1;
-      } else if (row.status === 'WAIT_RETURN') {
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn(`[after-sale] 超时自动同意失败 ${row.afterSaleNo}: ${reason}`);
+      }
+    }
+  } else {
+    const overdue = await prisma.afterSale.count({
+      where: { status: 'PENDING', createdAt: { lte: afterSaleReviewDeadline() } },
+    });
+    if (overdue > 0 && Date.now() - lastOverdueLogAt > 60 * 60 * 1000) {
+      lastOverdueLogAt = Date.now();
+      console.warn(
+        `[after-sale] ${overdue} 笔售后已超过 ${afterSaleReviewHours()} 小时未处理，等待商家确认（不会自动退款）`,
+      );
+    }
+  }
+
+  // ② 待买家退货超时 → 自动关闭（0 表示关闭该规则）
+  const returnDays = afterSaleReturnDays();
+  if (returnDays > 0) {
+    const returnDeadline = new Date(Date.now() - returnDays * 24 * 60 * 60 * 1000);
+    const staleReturns = await prisma.afterSale.findMany({
+      where: { status: 'WAIT_RETURN', agreedAt: { lte: returnDeadline } },
+      select: { afterSaleNo: true },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+    });
+    for (const row of staleReturns) {
+      try {
         const updated = await prisma.afterSale.updateMany({
           where: { afterSaleNo: row.afterSaleNo, status: 'WAIT_RETURN' },
           data: {
             status: 'CANCELLED',
             cancelledAt: new Date(),
-            rejectReason: `超时未寄回商品（${afterSaleReturnDays()} 天），售后自动关闭`,
+            rejectReason: `超时未寄回商品（${returnDays} 天），售后自动关闭`,
           },
         });
         if (updated.count) {
@@ -615,13 +669,14 @@ export async function autoProgressAfterSales(limit = 50): Promise<number> {
           if (fresh) await syncOrderAfterSaleStatus(fresh.orderId);
           handled += 1;
         }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        // 单笔失败不影响其它单（例如并发下已被人工处理）
+        console.warn(`[after-sale] 超时关闭失败 ${row.afterSaleNo}: ${reason}`);
       }
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      // 单笔失败不影响其它单（例如并发下已被人工处理）
-      console.warn(`[after-sale] 自动处理失败 ${row.afterSaleNo}: ${reason}`);
     }
   }
+
   return handled;
 }
 

@@ -111,15 +111,15 @@ const autoConfirmTimer = setInterval(() => {
 }, AUTO_CONFIRM_INTERVAL_MS);
 autoConfirmTimer.unref();
 
-// ---------- 售后：超时自动流转 + 退款对账 ----------
-// ① 商家超时未处理（默认 48h）→ 自动同意（淘宝规则），避免售后石沉大海
-// ② 买家超时未寄回（默认 7 天）→ 售后自动关闭
+// ---------- 售后：超时提醒 + 退款对账 ----------
+// ① 商家超时未处理（默认 48h）→ 只标红提醒，**不自动同意、不自动退款**（必须商家确认）
+// ② 买家超时未寄回（默认 7 天）→ 售后自动关闭（不涉及资金）
 // ③ 卡在「退款中」的售后主动查一次微信，补落退款回调丢失的
-// 每 10 分钟一轮。①会真的触发退款，所以走的是与人工同意完全相同的代码路径。
+// 每 10 分钟一轮。
 const AFTER_SALE_INTERVAL_MS = 10 * 60 * 1000;
 const afterSaleTimer = setInterval(() => {
   autoProgressAfterSales().then((n) => {
-    if (n > 0) console.log(`[after-sale] 本轮自动处理 ${n} 笔（超时同意 / 超时关闭）`);
+    if (n > 0) console.log(`[after-sale] 本轮自动关闭 ${n} 笔超时未退货售后`);
   }).catch(() => {});
   reconcileRefundingAfterSales().catch(() => {});
 }, AFTER_SALE_INTERVAL_MS);

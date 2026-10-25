@@ -20,8 +20,16 @@
       />
       <el-button type="primary" @click="reload">查询</el-button>
       <span class="muted tip">
-        待处理超过 {{ reviewHours }} 小时将自动同意；买家超过 {{ returnDays }} 天未寄回将自动关闭
+        待处理超过 {{ reviewHours }} 小时会标红提醒，但<strong>不会自动同意/退款</strong>，需你确认；
+        <template v-if="returnDays > 0">买家超过 {{ returnDays }} 天未寄回将自动关闭</template>
+        <template v-else>买家未寄回不会自动关闭</template>
       </span>
+      <el-tag v-if="overdueCount > 0" type="danger" effect="dark">
+        {{ overdueCount }} 笔已超时待处理
+      </el-tag>
+      <el-tag v-if="autoApprove" type="danger" effect="plain">
+        已开启超时自动退款（AFTER_SALE_AUTO_APPROVE=1）
+      </el-tag>
     </div>
 
     <el-table v-loading="loading" :data="rows" border stripe>
@@ -47,8 +55,8 @@
       <el-table-column label="状态" width="130">
         <template #default="{ row }">
           <el-tag :type="statusTag(row.status)">{{ statusText(row.status) }}</el-tag>
-          <div v-if="row.status === 'PENDING' && isOverdue(row.createdAt)" class="overdue">
-            已超时将自动同意
+          <div v-if="row.status === 'PENDING' && rowOverdue(row)" class="overdue">
+            已超时，待你确认
           </div>
         </template>
       </el-table-column>
@@ -90,6 +98,9 @@
           <el-descriptions-item label="售后单号">{{ detail.afterSaleNo }}</el-descriptions-item>
           <el-descriptions-item label="状态">
             <el-tag :type="statusTag(detail.status)">{{ statusText(detail.status) }}</el-tag>
+            <el-tag v-if="detail.status === 'PENDING' && rowOverdue(detail)" type="danger" class="ml">
+              已超时
+            </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="订单号">{{ detail.orderNo }}</el-descriptions-item>
           <el-descriptions-item label="用户">
@@ -254,10 +265,19 @@ const total = ref(0);
 const counts = ref<Partial<Record<AfterSaleStatus, number>>>({});
 const reviewHours = ref(48);
 const returnDays = ref(7);
+/** 待处理中已超时的笔数（仅提醒，不会自动退款） */
+const overdueCount = ref(0);
+/** 后端是否开启了「超时自动同意退款」，默认 false；开启时界面要显眼告警 */
+const autoApprove = ref(false);
 
-/** 待处理是否已超过商家处理时限（超时后后端会自动同意） */
-function isOverdue(createdAt: string): boolean {
-  return Date.now() - new Date(createdAt).getTime() > reviewHours.value * 60 * 60 * 1000;
+/**
+ * 是否已超过商家处理时限。
+ * 后端会直接下发 overdue，前端只在拿不到时（如详情接口旧版本）按 reviewHours 兜底计算。
+ * 注意：超时只是提醒，后端不会自动同意、更不会自动退款。
+ */
+function rowOverdue(row: AfterSaleRow): boolean {
+  if (typeof row.overdue === 'boolean') return row.overdue;
+  return Date.now() - new Date(row.createdAt).getTime() > reviewHours.value * 60 * 60 * 1000;
 }
 
 async function load() {
@@ -274,6 +294,8 @@ async function load() {
     counts.value = data.counts ?? {};
     reviewHours.value = data.reviewHours ?? 48;
     returnDays.value = data.returnDays ?? 7;
+    overdueCount.value = data.overdueCount ?? 0;
+    autoApprove.value = data.autoApprove ?? false;
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '加载失败');
   } finally {
@@ -430,9 +452,12 @@ onMounted(() => {
   font-weight: 600;
 }
 .overdue {
-  color: #e6a23c;
+  color: #f56c6c;
   font-size: 12px;
   margin-top: 2px;
+}
+.ml {
+  margin-left: 6px;
 }
 .pager {
   margin-top: 16px;

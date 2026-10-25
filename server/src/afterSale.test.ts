@@ -285,8 +285,8 @@ describe('售后与订单的联动', () => {
   });
 });
 
-describe('超时自动处理', () => {
-  it('商家超时未处理 → 自动同意并退款', async () => {
+describe('超时处理', () => {
+  it('商家超时未处理 → 只标记超时，不自动同意、不退款', async () => {
     const orderNo = await makeOrder('PAID');
     const apply = await request(createApp())
       .post('/api/after-sales')
@@ -294,13 +294,39 @@ describe('超时自动处理', () => {
       .send({ orderNo, type: 'REFUND_ONLY', reason: 'NOT_SHIPPED' });
     const afterSaleNo = apply.body.data.afterSaleNo;
 
-    // 把创建时间改到 49 小时前（默认 48 小时时限）
+    // 把创建时间改到 49 小时前（默认 48 小时提醒时限）
     await prisma.afterSale.update({
       where: { afterSaleNo },
       data: { createdAt: new Date(Date.now() - 49 * 60 * 60 * 1000) },
     });
 
     await autoProgressAfterSales();
+
+    const row = await prisma.afterSale.findUnique({ where: { afterSaleNo } });
+    // 超时只是提醒：状态必须还是待处理，钱一分不能动
+    expect(row?.status).toBe('PENDING');
+    expect(row?.refundedAmount).toBe(0);
+  });
+
+  it('显式开启 AFTER_SALE_AUTO_APPROVE=1 才会超时自动同意并退款', async () => {
+    const orderNo = await makeOrder('PAID');
+    const apply = await request(createApp())
+      .post('/api/after-sales')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ orderNo, type: 'REFUND_ONLY', reason: 'NOT_SHIPPED' });
+    const afterSaleNo = apply.body.data.afterSaleNo;
+
+    await prisma.afterSale.update({
+      where: { afterSaleNo },
+      data: { createdAt: new Date(Date.now() - 49 * 60 * 60 * 1000) },
+    });
+
+    process.env.AFTER_SALE_AUTO_APPROVE = '1';
+    try {
+      await autoProgressAfterSales();
+    } finally {
+      delete process.env.AFTER_SALE_AUTO_APPROVE;
+    }
 
     const row = await prisma.afterSale.findUnique({ where: { afterSaleNo } });
     expect(row?.status).toBe('COMPLETED');
