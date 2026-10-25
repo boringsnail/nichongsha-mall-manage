@@ -21,6 +21,8 @@ adminAfterSalesRouter.get('/', validate({
     status: z
       .enum(['PENDING', 'AGREED', 'WAIT_RETURN', 'RETURNING', 'REFUNDING', 'COMPLETED', 'REJECTED', 'CANCELLED'])
       .optional(),
+    // 售后单号 / 订单号 模糊搜索
+    keyword: z.string().trim().max(32).optional(),
     page: z.coerce.number().int().positive().optional(),
     size: z.coerce.number().int().positive().optional(),
   }),

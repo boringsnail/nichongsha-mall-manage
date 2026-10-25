@@ -11,6 +11,9 @@ export interface AdminOrderRow {
   remark: string | null;
   createdAt: string;
   itemCount: number;
+  /** 订单最新一笔售后的状态，无售后为 null */
+  afterSaleStatus?: string | null;
+  hasAfterSale?: boolean;
 }
 
 export interface AdminOrderDetail extends Omit<AdminOrderRow, 'itemCount'> {

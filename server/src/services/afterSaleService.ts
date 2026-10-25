@@ -340,11 +340,22 @@ export async function submitReturnTracking(
 
 // ---------- 商家侧 ----------
 
-export async function listAdminAfterSales(query: { status?: string; page?: number; size?: number }) {
+export async function listAdminAfterSales(query: {
+  status?: string;
+  keyword?: string;
+  page?: number;
+  size?: number;
+}) {
   const page = Math.max(1, query.page ?? 1);
-  const size = Math.min(50, Math.max(1, query.size ?? 10));
-  const where = query.status ? { status: query.status as never } : {};
-  const [total, rows] = await Promise.all([
+  const size = Math.min(50, Math.max(1, query.size ?? 20));
+  const keyword = query.keyword?.trim();
+  const where = {
+    ...(query.status ? { status: query.status as never } : {}),
+    // 商家最常用的两个检索入口：售后单号、订单号。都是精确/前缀可命中的短串，
+    // 用 contains 足够，不必上全文索引。
+    ...(keyword ? { OR: [{ afterSaleNo: { contains: keyword } }, { orderNo: { contains: keyword } }] } : {}),
+  };
+  const [total, rows, grouped] = await Promise.all([
     prisma.afterSale.count({ where }),
     prisma.afterSale.findMany({
       where,
@@ -353,6 +364,9 @@ export async function listAdminAfterSales(query: { status?: string; page?: numbe
       take: size,
       include: { order: { include: { items: true, user: true } } },
     }),
+    // 各状态的总数：标签页上直接显示「待处理 3」，商家一眼知道有没有活要干。
+    // 这里刻意不带 where，统计的是全量而非当前筛选结果。
+    prisma.afterSale.groupBy({ by: ['status'], _count: { _all: true } }),
   ]);
   return {
     list: rows.map((r) =>
@@ -372,6 +386,12 @@ export async function listAdminAfterSales(query: { status?: string; page?: numbe
     total,
     page,
     size,
+    /** 各状态数量（全量口径），供管控台标签页显示待办数 */
+    counts: Object.fromEntries(grouped.map((g) => [g.status, g._count._all])) as Record<string, number>,
+    // 把「超时自动同意/自动关闭」的规则带回前端，管控台才能准确显示倒计时，
+    // 而不是在界面上硬编码 48 小时（实际由环境变量控制）
+    reviewHours: afterSaleReviewHours(),
+    returnDays: afterSaleReturnDays(),
   };
 }
 

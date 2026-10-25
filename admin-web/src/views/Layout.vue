@@ -15,6 +15,7 @@
         <el-menu-item index="/products/import"><span class="dot" />批量导入商品</el-menu-item>
         <el-menu-item index="/categories"><span class="dot" />分类管理</el-menu-item>
         <el-menu-item index="/orders"><span class="dot" />订单管理</el-menu-item>
+        <el-menu-item index="/after-sales"><span class="dot" />售后管理</el-menu-item>
         <el-menu-item index="/users"><span class="dot" />用户管理</el-menu-item>
         <el-menu-item index="/stock"><span class="dot" />库存管理</el-menu-item>
       </el-menu>

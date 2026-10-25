@@ -21,20 +21,28 @@
         <template #default="{ row }">{{ fenToYuan(row.totalAmount) }}</template>
       </el-table-column>
       <el-table-column prop="itemCount" label="商品数" width="80" />
-      <el-table-column label="状态" width="110">
+      <el-table-column label="状态" width="150">
         <template #default="{ row }">
           <el-tag :type="statusTag(row.status)">{{ statusText(row.status) }}</el-tag>
+          <div v-if="row.afterSaleStatus" class="as-tag">
+            <el-tag size="small" :type="afterSaleTag(row.afterSaleStatus)" effect="plain">
+              {{ afterSaleText(row.afterSaleStatus) }}
+            </el-tag>
+          </div>
         </template>
       </el-table-column>
       <el-table-column label="下单时间" width="170">
         <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="150" fixed="right">
+      <el-table-column label="操作" width="200" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openDetail(row.orderNo)">详情</el-button>
           <el-button v-if="row.status === 'PAID'" link type="success" @click="openShip(row.orderNo)">发货</el-button>
           <el-button v-if="row.status === 'PAID' || row.status === 'SHIPPED'" link type="warning" @click="syncOne(row.orderNo)">
             同步
+          </el-button>
+          <el-button v-if="row.afterSaleStatus" link type="danger" @click="openAfterSale(row.orderNo)">
+            售后
           </el-button>
         </template>
       </el-table-column>
@@ -151,6 +159,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import {
   adminListOrders,
@@ -206,7 +215,38 @@ const STATUS_TAG: Record<OrderStatus, TagType> = {
 };
 const statusTag = (s: OrderStatus): TagType => STATUS_TAG[s];
 
+/** 售后角标：一眼看出这单有售后、到哪一步了 */
+const AFTER_SALE_TEXT: Record<string, string> = {
+  PENDING: '售后待处理',
+  AGREED: '售后已同意',
+  WAIT_RETURN: '待买家退货',
+  RETURNING: '退货中',
+  REFUNDING: '退款中',
+  COMPLETED: '已退款',
+  REJECTED: '售后被拒',
+  CANCELLED: '售后已撤销',
+};
+const AFTER_SALE_TAG: Record<string, TagType> = {
+  PENDING: 'warning',
+  AGREED: 'info',
+  WAIT_RETURN: 'warning',
+  RETURNING: 'primary',
+  REFUNDING: 'primary',
+  COMPLETED: 'success',
+  REJECTED: 'danger',
+  CANCELLED: 'info',
+};
+const afterSaleText = (s: string) => AFTER_SALE_TEXT[s] ?? s;
+const afterSaleTag = (s: string): TagType => AFTER_SALE_TAG[s] ?? 'info';
+
 const formatTime = (t: string) => new Date(t).toLocaleString('zh-CN', { hour12: false });
+
+const router = useRouter();
+
+/** 跳到售后管理页并按订单号过滤，省得商家再手输一遍 */
+function openAfterSale(orderNo: string) {
+  router.push({ path: '/after-sales', query: { orderNo } });
+}
 
 const loading = ref(false);
 const rows = ref<AdminOrderRow[]>([]);
@@ -352,6 +392,9 @@ onMounted(load);
 }
 .logi-text {
   margin-left: 8px;
+}
+.as-tag {
+  margin-top: 4px;
 }
 .item-table {
   margin-top: 12px;

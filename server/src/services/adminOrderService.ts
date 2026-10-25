@@ -27,6 +27,9 @@ export async function listAdminOrders(query: { status?: string; page?: number; s
       remark: o.remark,
       createdAt: o.createdAt,
       itemCount: o.items.length,
+      // 售后角标：列表页据此显示「售后中 / 已退款」，不用再点进详情
+      afterSaleStatus: o.afterSaleStatus,
+      hasAfterSale: Boolean(o.afterSaleStatus),
     })),
     total,
     page,
@@ -64,6 +67,7 @@ export async function getAdminOrderDetail(orderNo: string) {
     logisticsCompany: order.logisticsCompany,
     trackingNo: order.trackingNo,
     logisticsType: order.logisticsType,
+    afterSaleStatus: order.afterSaleStatus,
     address: JSON.parse(order.addressSnapshot),
     items: order.items.map((i) => ({
       productName: i.productName,
