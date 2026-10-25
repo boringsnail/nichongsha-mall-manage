@@ -26,6 +26,11 @@ FROM node:20-slim
 ENV NODE_ENV=production
 # 默认监听 8080，与 container.config.json 的 containerPort 对齐；云托管/部署方可用 PORT 覆盖
 ENV PORT=8080
+# 微信云托管「开放接口服务」（云调用）会在容器内给 api.weixin.qq.com 挂一张一次性自签名证书，
+# 证书落在 /app/cert/certificate.crt，需要让 Node 信任它，否则容器内调小程序开放接口会报
+# DEPTH_ZERO_SELF_SIGNED_CERT（表现为订单发货状态永远同步不过来）。
+# 该文件只在云托管容器内存在；不存在时 Node 仅打印 warning，不影响启动。
+ENV NODE_EXTRA_CA_CERTS=/app/cert/certificate.crt
 WORKDIR /app
 RUN apt-get update -y && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/* \
     && groupadd -r app && useradd -r -g app app

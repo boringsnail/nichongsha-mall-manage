@@ -1,6 +1,7 @@
 import { prisma } from '../db.js';
 import { env } from '../config/env.js';
 import { getAccessToken } from './wechatAccessToken.js';
+import { wxFetch, isUsingHttpFallback } from './wechatHttp.js';
 
 // 订单发货管理（微信「发货信息管理」）
 // 背景：小程序提供**实物交易服务**时，微信要求接入订单发货管理并上传发货信息，
@@ -65,7 +66,7 @@ async function postWx<T extends { errcode?: number; errmsg?: string }>(
   let last: T | undefined;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const token = await getAccessToken(attempt > 0);
-    const res = await fetch(`https://api.weixin.qq.com${apiPath}?access_token=${encodeURIComponent(token)}`, {
+    const res = await wxFetch(`${apiPath}?access_token=${encodeURIComponent(token)}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
@@ -146,10 +147,11 @@ export async function isTradeManaged(): Promise<boolean | null> {
   if (!env.wxAppid || !env.wxSecret) return null;
   try {
     const token = await getAccessToken();
-    const res = await fetch(
-      `https://api.weixin.qq.com/wxa/sec/order/is_trade_managed?access_token=${encodeURIComponent(token)}`,
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) },
-    );
+    const res = await wxFetch(`/wxa/sec/order/is_trade_managed?access_token=${encodeURIComponent(token)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
     const data = (await res.json()) as { errcode?: number; is_trade_managed?: boolean };
     return data.errcode === 0 ? Boolean(data.is_trade_managed) : null;
   } catch {
@@ -234,8 +236,46 @@ export interface WxDiagnoseResult {
   appidConfigured: boolean;
   secretConfigured: boolean;
   mchid: string | null;
+  /** 小程序开放接口是否已降级为 HTTP（云托管云调用链路的正常表现） */
+  wxHttpFallback: boolean;
+  /** 出网探测：容器能不能连上微信的各个域名（DNS + TCP + TLS 一起验） */
+  network: { host: string; ok: boolean; detail: string }[];
   token: { ok: boolean; error?: string };
   order: WechatOrderInfo;
+}
+
+/**
+ * 出网探测：分别打一下小程序接口域名与支付域名。
+ *
+ * 为什么需要：云托管容器的出网策略/内网 DNS 一旦变化，报错只是一句
+ * 「fetch failed」，看不出是 DNS 挂了、还是连不通、还是证书问题。
+ * 这里把每个域名的底层错误原文带出来，一次就能定位。
+ */
+async function probeHosts(): Promise<{ host: string; ok: boolean; detail: string }[]> {
+  const probes: { host: string; run: () => Promise<Response> }[] = [
+    {
+      host: 'api.weixin.qq.com（小程序开放接口）',
+      run: () => wxFetch('/', { method: 'GET', signal: AbortSignal.timeout(8000) }),
+    },
+    {
+      host: 'api.mch.weixin.qq.com（微信支付）',
+      run: () => fetch('https://api.mch.weixin.qq.com/', { method: 'HEAD', signal: AbortSignal.timeout(8000) }),
+    },
+  ];
+
+  const results = [];
+  for (const probe of probes) {
+    const started = Date.now();
+    try {
+      const res = await probe.run();
+      results.push({ host: probe.host, ok: true, detail: `HTTP ${res.status}，耗时 ${Date.now() - started}ms` });
+    } catch (error) {
+      const e = error as { name?: string; message?: string; cause?: { code?: string; message?: string } };
+      const detail = [e.name, e.message, e.cause?.code, e.cause?.message].filter(Boolean).join(' | ');
+      results.push({ host: probe.host, ok: false, detail: detail || String(error) });
+    }
+  }
+  return results;
 }
 
 /**
@@ -244,8 +284,9 @@ export interface WxDiagnoseResult {
  * 线上排障时最痛的是「同步点了没反应」——既看不到 token 是否拿到，也看不到
  * get_order 返回了什么。这个接口把链路逐段暴露出来（全部只读，不含密钥）：
  *   1. 三个关键环境变量是否配好
- *   2. 能不能拿到 access_token（拿不到会把 errcode 带回来）
- *   3. get_order 的真实返回
+ *   2. 容器能不能出网访问微信域名
+ *   3. 能不能拿到 access_token（拿不到会把 errcode 带回来）
+ *   4. get_order 的真实返回
  */
 export async function diagnoseWechatOrder(orderNo: string): Promise<WxDiagnoseResult> {
   const mchid = env.pay.direct.mchid || env.pay.subMchId || null;
@@ -262,6 +303,8 @@ export async function diagnoseWechatOrder(orderNo: string): Promise<WxDiagnoseRe
     appidConfigured: Boolean(env.wxAppid),
     secretConfigured: Boolean(env.wxSecret),
     mchid,
+    wxHttpFallback: isUsingHttpFallback(),
+    network: await probeHosts(),
     token,
     order: await getWechatOrderState(orderNo),
   };
