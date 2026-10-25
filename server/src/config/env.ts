@@ -27,6 +27,43 @@ if (wxSecret && !/^[0-9a-f]{32}$/i.test(wxSecret)) {
   console.warn(`[warn] WX_APPSECRET 形状可疑（应为 32 位十六进制，实长 ${wxSecret.length}），请检查是否粘贴了多余字符`);
 }
 
+// ---------- JWT_EXPIRES_IN ----------
+// 控制台粘贴的环境变量常被自动加上引号（`"7d"`）或带首尾空白/换行，中文单位（`7天`）也很常见。
+// jsonwebtoken 遇到这类值会在 **签发 token 时** 抛
+//   `"expiresIn" should be a number of seconds or string representing a timespan`
+// 表现为「账号密码都对了却返回 500 / 服务器开小差了」——极难自查，故在配置层直接清洗 + 校验，
+// 不合法就回落默认值并告警，绝不让它把登录流程打挂。
+const JWT_EXPIRES_IN_DEFAULT = '7d';
+/** 与 jsonwebtoken 依赖的 ms 库一致的时长写法（数字单位、允许中间一个空格） */
+const JWT_EXPIRES_IN_PATTERN =
+  /^\d+(\.\d+)?\s*(ms|msecs?|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|weeks?|y|yrs?|years?)$/i;
+
+function resolveJwtExpiresIn(raw: string | undefined): string {
+  if (raw === undefined) return JWT_EXPIRES_IN_DEFAULT;
+  // 去掉成对包裹的引号（含反引号）与首尾空白
+  let value = raw.trim();
+  if (value.length >= 2) {
+    const head = value[0];
+    if ((head === '"' || head === "'" || head === '`') && value.endsWith(head)) {
+      value = value.slice(1, -1).trim();
+    }
+  }
+  if (!value) {
+    console.warn(`[warn] JWT_EXPIRES_IN 为空（原始值「${raw}」），已回落为 ${JWT_EXPIRES_IN_DEFAULT}`);
+    return JWT_EXPIRES_IN_DEFAULT;
+  }
+  // 纯数字：保持原样（jsonwebtoken 的数字语义），不在这里改语义，避免改变既有部署行为
+  if (/^\d+$/.test(value)) return value;
+  if (JWT_EXPIRES_IN_PATTERN.test(value)) return value;
+  console.warn(
+    `[warn] JWT_EXPIRES_IN 不合法（原始值「${raw}」），已回落为 ${JWT_EXPIRES_IN_DEFAULT}；` +
+      '合法写法如 7d / 12h / 30m，不要带引号、不要用中文单位',
+  );
+  return JWT_EXPIRES_IN_DEFAULT;
+}
+
+const jwtExpiresIn = resolveJwtExpiresIn(process.env.JWT_EXPIRES_IN);
+
 const DEFAULT_DATABASE = 'nichongsha';
 
 const CONFIG_HINT =
@@ -345,7 +382,7 @@ if (payProvider === 'wechatpay') {
 export const env = {
   port: Number(process.env.PORT ?? 3000),
   jwtSecret,
-  jwtExpiresIn: (process.env.JWT_EXPIRES_IN ?? '7d') as string, // 缩短默认 30d → 7d
+  jwtExpiresIn, // 已做引号/空白清洗与合法性校验，非法值回落 '7d'
   databaseUrl,
   /** 不含账号密码的连接目标，用于启动日志排查 */
   databaseTarget: resolved.target,
