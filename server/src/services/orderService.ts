@@ -588,15 +588,24 @@ export async function autoCompleteShippedOrders(limit = 200): Promise<number> {
  *   2. 微信返回「已退款 / 已关闭」不自动改本地状态——退款涉及资金，必须人工核对；
  *   3. 任何异常都静默返回 false，绝不因为对账失败影响正常读接口。
  */
-export async function syncFulfillmentQuietly(orderNo: string): Promise<boolean> {
+export async function syncFulfillmentQuietly(
+  orderNo: string,
+  options: { force?: boolean } = {},
+): Promise<boolean> {
   const key = `f:${orderNo}`;
   const last = lastSyncAt.get(key) ?? 0;
-  if (Date.now() - last < 30_000) return false;
+  // 手动「立即同步」需要绕过 30 秒节流，否则用户点了没反应会以为功能坏了
+  if (!options.force && Date.now() - last < 30_000) return false;
   if (lastSyncAt.size > 500) lastSyncAt.clear();
   lastSyncAt.set(key, Date.now());
 
   const info = await getWechatOrderState(orderNo);
-  if (!info.ok || typeof info.orderState !== 'number') return false;
+  if (!info.ok || typeof info.orderState !== 'number') {
+    // 以前这里完全静默，线上出现「微信已发货、本地一直是已支付」时无从下手；
+    // 留一条 warn 便于在容器日志里定位（token 失效 / 商户号未配 / 网络不通）。
+    console.warn(`[fulfill-sync] 拉取微信订单状态失败 ${orderNo}：${info.error ?? '响应缺少 order_state'}`);
+    return false;
+  }
 
   const order = await prisma.order.findUnique({ where: { orderNo } });
   if (!order) return false;

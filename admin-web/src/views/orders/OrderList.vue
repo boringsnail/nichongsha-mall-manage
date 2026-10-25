@@ -5,6 +5,8 @@
         <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
       <el-button type="primary" @click="load">查询</el-button>
+      <el-button :loading="syncing" @click="syncAll">同步微信状态</el-button>
+      <span class="muted sync-tip">商家在微信后台「订单发货管理」里发货不会回调本系统，点此拉取最新状态</span>
     </div>
 
     <el-table v-loading="loading" :data="rows" border stripe>
@@ -31,6 +33,9 @@
         <template #default="{ row }">
           <el-button link type="primary" @click="openDetail(row.orderNo)">详情</el-button>
           <el-button v-if="row.status === 'PAID'" link type="success" @click="openShip(row.orderNo)">发货</el-button>
+          <el-button v-if="row.status === 'PAID' || row.status === 'SHIPPED'" link type="warning" @click="syncOne(row.orderNo)">
+            同步
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -104,6 +109,8 @@ import {
   adminListOrders,
   adminGetOrder,
   adminShipOrder,
+  adminSyncOrderFromWechat,
+  adminSyncOrdersFromWechat,
   type AdminOrderDetail,
   type AdminOrderRow,
   type OrderStatus,
@@ -155,6 +162,35 @@ async function load() {
 function onPage(p: number) {
   page.value = p;
   load();
+}
+
+const syncing = ref(false);
+
+/** 批量对账：商家在微信后台录的发货、微信 T+10 自动确认收货，都要靠这里拉回来 */
+async function syncAll() {
+  syncing.value = true;
+  try {
+    const r = await adminSyncOrdersFromWechat();
+    if (r.updated > 0) ElMessage.success(`已核对 ${r.checked} 笔，更新 ${r.updated} 笔`);
+    else ElMessage.info(`已核对 ${r.checked} 笔，状态均为最新${r.failed ? `（${r.failed} 笔拉取失败）` : ''}`);
+    await load();
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '同步失败');
+  } finally {
+    syncing.value = false;
+  }
+}
+
+/** 单笔对账：点一下立刻看到微信侧最新状态 */
+async function syncOne(orderNo: string) {
+  try {
+    const r = await adminSyncOrderFromWechat(orderNo);
+    if (r.changed) ElMessage.success(`已同步：${statusText(r.before)} → ${statusText(r.status)}`);
+    else ElMessage.info(`微信侧状态无变化（本地仍为${statusText(r.status)}）`);
+    await load();
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '同步失败');
+  }
 }
 
 const detailVisible = ref(false);
@@ -223,6 +259,9 @@ onMounted(load);
 .muted {
   color: #999;
   font-size: 12px;
+}
+.sync-tip {
+  align-self: center;
 }
 .item-table {
   margin-top: 12px;

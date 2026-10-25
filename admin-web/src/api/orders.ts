@@ -42,3 +42,29 @@ export function adminGetOrder(orderNo: string): Promise<AdminOrderDetail> {
 export function adminShipOrder(orderNo: string, data: { logisticsCompany: string; trackingNo: string }): Promise<AdminOrderDetail> {
   return api.post<AdminOrderDetail>(`/admin/orders/${orderNo}/ship`, data);
 }
+
+export interface WxSyncResult {
+  orderNo: string;
+  changed: boolean;
+  before: OrderStatus;
+  status: OrderStatus;
+  shippedAt: string | null;
+  logisticsCompany: string | null;
+  trackingNo: string | null;
+}
+
+export interface WxSyncBatchResult {
+  checked: number;
+  updated: number;
+  failed: number;
+}
+
+/** 手动把单笔订单的微信侧履约状态拉回本地 */
+export function adminSyncOrderFromWechat(orderNo: string): Promise<WxSyncResult> {
+  return api.post<WxSyncResult>(`/admin/orders/${orderNo}/sync-wx`);
+}
+
+/** 批量对账：近 60 天「已支付 / 已发货」订单逐笔与微信核对 */
+export function adminSyncOrdersFromWechat(): Promise<WxSyncBatchResult> {
+  return api.post<WxSyncBatchResult>('/admin/orders/sync-wx');
+}

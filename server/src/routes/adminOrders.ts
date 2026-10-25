@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { validate } from '../middleware/validate.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { listAdminOrders, getAdminOrderDetail, shipOrder } from '../services/adminOrderService.js';
+import { listAdminOrders, getAdminOrderDetail, shipOrder, syncAdminOrderFromWechat, syncAdminOrdersFromWechat } from '../services/adminOrderService.js';
 
 export const adminOrdersRouter = Router();
 
@@ -30,3 +30,16 @@ adminOrdersRouter.get('/:orderNo', validate({ params: z.object({ orderNo: z.stri
 adminOrdersRouter.post('/:orderNo/ship', shipSchema, asyncHandler(async (req, res) => {
   res.json({ code: 0, data: await shipOrder(req.params.orderNo, req.body) });
 }));
+
+// 手动对账：把微信侧（商家可能是在微信后台发的货）的履约状态拉回本地
+adminOrdersRouter.post('/sync-wx', asyncHandler(async (_req, res) => {
+  res.json({ code: 0, data: await syncAdminOrdersFromWechat() });
+}));
+
+adminOrdersRouter.post(
+  '/:orderNo/sync-wx',
+  validate({ params: z.object({ orderNo: z.string().regex(/^NPA\d{16}$/) }) }),
+  asyncHandler(async (req, res) => {
+    res.json({ code: 0, data: await syncAdminOrderFromWechat(req.params.orderNo) });
+  }),
+);

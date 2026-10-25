@@ -48,6 +48,39 @@ export interface ShippingUploadResult {
   error?: string;
 }
 
+/** access_token 失效类错误码：40001 凭据无效 / 40014 不合法 / 42001 已过期 */
+const TOKEN_INVALID_ERRCODES = new Set([40001, 40014, 42001]);
+
+/**
+ * 调用微信开放接口并自动处理 token 失效：首次失败且是 token 类错误时，
+ * 强制刷新 access_token 后重试一次。
+ *
+ * 为什么需要：token 是全局唯一的，同 AppID 的其他服务（C 端后端）刷新后，
+ * 本服务缓存的 token 会立刻失效；不重试就会出现「偶发、间歇」的状态不同步。
+ */
+async function postWx<T extends { errcode?: number; errmsg?: string }>(
+  apiPath: string,
+  payload: unknown,
+): Promise<T> {
+  let last: T | undefined;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const token = await getAccessToken(attempt > 0);
+    const res = await fetch(`https://api.weixin.qq.com${apiPath}?access_token=${encodeURIComponent(token)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = (await res.json()) as T;
+    last = data;
+    if (attempt === 0 && TOKEN_INVALID_ERRCODES.has(Number(data.errcode))) {
+      console.warn(`[wx] ${apiPath} access_token 失效（errcode=${data.errcode}），强制刷新后重试`);
+      continue;
+    }
+    return data;
+  }
+  return last as T;
+}
+
 /** 发货信息上报：把商家填写的物流信息上传微信（幂等友好：重复上报同单号微信会接受） */
 export async function uploadShippingInfo(orderNo: string): Promise<ShippingUploadResult> {
   if (!env.wxAppid || !env.wxSecret) {
@@ -91,12 +124,10 @@ export async function uploadShippingInfo(orderNo: string): Promise<ShippingUploa
   };
 
   try {
-    const token = await getAccessToken();
-    const res = await fetch(
-      `https://api.weixin.qq.com/wxa/sec/order/upload_shipping_info?access_token=${encodeURIComponent(token)}`,
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) },
+    const data = await postWx<{ errcode?: number; errmsg?: string }>(
+      '/wxa/sec/order/upload_shipping_info',
+      payload,
     );
-    const data = (await res.json()) as { errcode?: number; errmsg?: string };
     if (data.errcode !== 0) {
       console.error(`[wx-shipping] 发货信息上报失败：errcode=${data.errcode} errmsg=${data.errmsg}`);
       return { ok: false, error: `微信返回 ${data.errcode}: ${data.errmsg ?? ''}` };
@@ -172,21 +203,15 @@ export async function getWechatOrderState(orderNo: string): Promise<WechatOrderI
   const mchid = env.pay.direct.mchid || env.pay.subMchId;
   if (!mchid) return { ok: false, error: '未配置商户号' };
   try {
-    const token = await getAccessToken();
-    const res = await fetch(
-      `https://api.weixin.qq.com/wxa/sec/order/get_order?access_token=${encodeURIComponent(token)}`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        // merchant_id 必须是数字，传字符串会 40097 invalid args
-        body: JSON.stringify({ merchant_id: Number(mchid), merchant_trade_no: orderNo }),
-      },
-    );
-    const data = (await res.json()) as {
+    const data = await postWx<{
       errcode?: number;
       errmsg?: string;
       order?: { order_state?: number; transaction_id?: string; shipping?: WxShipping };
-    };
+    }>(
+      '/wxa/sec/order/get_order',
+      // merchant_id 必须是数字，传字符串会 40097 invalid args
+      { merchant_id: Number(mchid), merchant_trade_no: orderNo },
+    );
     if (data.errcode !== 0) {
       return { ok: false, error: `${data.errcode}: ${data.errmsg ?? ''}` };
     }

@@ -99,3 +99,52 @@ export async function shipOrder(orderNo: string, data: { logisticsCompany: strin
   const shipped = await prisma.order.findUniqueOrThrow({ where: { orderNo } });
   return { ...shipped, wechatShipping };
 }
+
+/**
+ * 手动同步单笔订单的微信侧状态（绕过 30 秒节流）。
+ *
+ * 场景：商家习惯在微信后台「订单发货管理 → 发货信息录入」里录发货，
+ * 那里只改微信侧、不回调我们；管控台给一个「立即同步」入口，点一下就能拉回来。
+ */
+export async function syncAdminOrderFromWechat(orderNo: string) {
+  const before = await prisma.order.findUnique({ where: { orderNo } });
+  if (!before) throw notFound('订单不存在');
+
+  const changed = await syncFulfillmentQuietly(orderNo, { force: true });
+  const latest = await prisma.order.findUniqueOrThrow({ where: { orderNo } });
+  return {
+    orderNo,
+    changed,
+    before: before.status,
+    status: latest.status,
+    shippedAt: latest.shippedAt,
+    logisticsCompany: latest.logisticsCompany,
+    trackingNo: latest.trackingNo,
+  };
+}
+
+/**
+ * 批量对账：把近 60 天内「已支付 / 已发货」的订单逐笔与微信侧核对。
+ * 供管控台「同步微信状态」按钮使用；单笔失败不影响其余订单。
+ */
+export async function syncAdminOrdersFromWechat(limit = 30) {
+  const since = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+  const rows = await prisma.order.findMany({
+    where: { status: { in: ['PAID', 'SHIPPED'] }, createdAt: { gte: since } },
+    select: { orderNo: true },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+  });
+
+  let updated = 0;
+  let failed = 0;
+  for (const row of rows) {
+    try {
+      if (await syncFulfillmentQuietly(row.orderNo, { force: true })) updated += 1;
+    } catch (error) {
+      failed += 1;
+      console.warn(`[fulfill-sync] 批量对账失败 ${row.orderNo}:`, error instanceof Error ? error.message : error);
+    }
+  }
+  return { checked: rows.length, updated, failed };
+}
