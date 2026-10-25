@@ -1,0 +1,43 @@
+# 本地 Docker 全链路验证（与云托管部署同一镜像）
+# 用法：
+#   docker compose up --build
+#   curl http://localhost:8080/api/health
+# 注意：本地验证用 development 模式（mock 登录）；云端用 production 模式并在
+# 云托管控制台注入真实环境变量（JWT_SECRET/WX_APPID/WX_APPSECRET/DATABASE_URL）。
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: nichongsha
+      TZ: Asia/Shanghai
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - db-data:/var/lib/mysql
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      NODE_ENV: development
+      PORT: 8080
+      DATABASE_URL: mysql://root:root@db:3306/nichongsha
+      JWT_SECRET: local-docker-verify-secret-32chars
+      JWT_EXPIRES_IN: 7d
+      ORDER_EXPIRE_MINUTES: 30
+      ADMIN_ORIGINS: http://localhost:5173
+      MINIPROGRAM_ORIGINS: ""
+
+volumes:
+  db-data:

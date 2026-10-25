@@ -1,0 +1,257 @@
+// 你宠啥商城数据模型 —— SQLite（开发） / MySQL（上线）
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider          = "mysql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = "mysql://root:@localhost:3306/nichongsha_shadow"
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  SHIPPED
+  COMPLETED
+  CANCELLED
+}
+
+// 售后类型（对齐淘宝：只退款不退货 / 退货退款）
+enum AfterSaleType {
+  // 仅退款：没收到货（未发货、物流停滞）或与商家协商一致，不需要把货寄回
+  REFUND_ONLY
+  // 退货退款：已收到货，要把货寄回给商家，商家确认收货后退款
+  RETURN_REFUND
+}
+
+// 售后状态机（对齐淘宝售后流程）：
+//
+//  REFUND_ONLY：  PENDING ──商家同意──→ AGREED ──退款──→ REFUNDING ──→ COMPLETED
+//                    └──商家拒绝──→ REJECTED ──用户可再次申请/申请平台介入
+//
+//  RETURN_REFUND：PENDING ──商家同意──→ WAIT_RETURN ──用户填单号──→ RETURNING
+//                    └──商家拒绝──→ REJECTED        ──商家确认收货──→ REFUNDING ──→ COMPLETED
+//
+// 任何非终态都可以被用户主动撤销（CANCELLED）。
+enum AfterSaleStatus {
+  // 待商家处理
+  PENDING
+  // 商家已同意（仅退款：可直接退款；退货退款：进入待买家退货）
+  AGREED
+  // 待买家退货（仅退货退款）
+  WAIT_RETURN
+  // 买家已退货，等待商家收货
+  RETURNING
+  // 退款中（已向微信提交退款，等微信回调）
+  REFUNDING
+  // 售后完成（退款到账）
+  COMPLETED
+  // 商家拒绝
+  REJECTED
+  // 买家撤销
+  CANCELLED
+}
+
+// 售后单
+model AfterSale {
+  id                     Int             @id @default(autoincrement())
+  // 售后单号：AS + yyMMddHHmmss + 4 位随机，供用户/客服沟通使用
+  afterSaleNo            String          @unique @db.VarChar(32)
+  orderId                Int
+  orderNo                String          @db.VarChar(32)
+  userId                 Int
+  type                   AfterSaleType
+  status                 AfterSaleStatus @default(PENDING)
+  // 申请原因（枚举值，展示文案在小程序侧）与用户补充说明
+  reason                 String          @db.VarChar(32)
+  description            String?         @db.VarChar(512)
+  // 凭证图片 JSON 数组（URL），最多 6 张
+  images                 String          @default("[]") @db.VarChar(2048)
+  // 申请退款金额（分）。不超过订单实付金额
+  refundAmount           Int
+  // 实际已退金额（分）：部分退款/多次退款时逐笔累加，退款成功才写
+  refundedAmount         Int             @default(0)
+  // 微信退款单号（退款成功后写入）
+  refundNo               String?         @db.VarChar(64)
+  // 商家拒绝原因
+  rejectReason           String?         @db.VarChar(256)
+  // 买家退货物流（仅退货退款）
+  returnLogisticsCompany String?         @db.VarChar(64)
+  returnTrackingNo       String?         @db.VarChar(64)
+  // 时间轴
+  agreedAt               DateTime?
+  returnedAt             DateTime? // 买家填写退货单号的时间
+  receivedAt             DateTime? // 商家确认收到退货
+  refundedAt             DateTime? // 退款成功
+  rejectedAt             DateTime?
+  cancelledAt            DateTime?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  // 同一订单可能有多笔售后（部分退款场景），但列表查询几乎都按订单过滤
+  @@index([orderNo])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([orderId, status])
+}
+
+// 埋点事件：小程序行为上报（转化漏斗数据源）
+// eventType: app_launch | product_view | add_cart | create_order | pay_success
+model UserEvent {
+  id        Int      @id @default(autoincrement())
+  eventType String   @db.VarChar(32)
+  // 登录用户可关联；未登录访客仅 sessionId
+  userId    Int?
+  openid    String?  @db.VarChar(64)
+  // 匿名会话标识：小程序 onLaunch 生成并本地持久化（uuid）
+  sessionId String?  @db.VarChar(64)
+  productId Int?
+  skuId     Int?
+  orderNo   String?  @db.VarChar(32)
+  amount    Int?
+  createdAt DateTime @default(now())
+
+  @@index([eventType, createdAt])
+  @@index([createdAt])
+  @@index([userId])
+  @@index([productId])
+}
+
+enum ProductStatus {
+  ON
+  OFF
+}
+
+model User {
+  id         Int         @id @default(autoincrement())
+  openid     String      @unique
+  nickname   String?
+  avatarUrl  String?
+  phone      String?
+  createdAt  DateTime    @default(now())
+  addresses  Address[]
+  carts      Cart[]
+  orders     Order[]
+  afterSales AfterSale[]
+}
+
+model Address {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  receiverName String
+  phone        String
+  province     String
+  city         String
+  district     String
+  detail       String
+  isDefault    Boolean  @default(false)
+  user         User     @relation(fields: [userId], references: [id])
+  createdAt    DateTime @default(now())
+}
+
+model Category {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  icon      String?
+  sortOrder Int       @default(0)
+  products  Product[]
+}
+
+model Product {
+  id          Int           @id @default(autoincrement())
+  name        String
+  subtitle    String?
+  description String?       @db.VarChar(2048)
+  coverImage  String        @db.VarChar(512)
+  // 轮播图 JSON 数组字符串：多张图 URL 远超默认 VARCHAR(191)，必须显式加长
+  images      String        @default("[]") @db.VarChar(2048)
+  categoryId  Int
+  status      ProductStatus @default(ON)
+  salesCount  Int           @default(0)
+  // 冗余最低价：SKU 价变更时同步维护（SQLite 不支持 relation min 排序，供 C 端 sort=price 下推 SQL）
+  minPrice    Int           @default(0)
+  category    Category      @relation(fields: [categoryId], references: [id])
+  skus        Sku[]
+  orderItems  OrderItem[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+}
+
+model Sku {
+  id         Int         @id @default(autoincrement())
+  productId  Int
+  specName   String
+  price      Int
+  stock      Int         @default(0)
+  product    Product     @relation(fields: [productId], references: [id])
+  cartItems  Cart[]
+  orderItems OrderItem[]
+}
+
+model Cart {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  skuId     Int
+  quantity  Int      @default(1)
+  checked   Boolean  @default(true)
+  user      User     @relation(fields: [userId], references: [id])
+  sku       Sku      @relation(fields: [skuId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, skuId])
+}
+
+model Order {
+  id               Int         @id @default(autoincrement())
+  orderNo          String      @unique
+  userId           Int
+  totalAmount      Int
+  freight          Int         @default(0)
+  status           OrderStatus @default(PENDING_PAYMENT)
+  // 收货地址 JSON 快照：默认 VARCHAR(191) 会截断，显式加长
+  addressSnapshot  String      @db.VarChar(1024)
+  remark           String?     @db.VarChar(512)
+  paidAt           DateTime?
+  // 微信支付交易号（支付成功回调/查单时写入，用于对账与退款）
+  paymentNo        String?
+  shippedAt        DateTime?
+  completedAt      DateTime?
+  cancelledAt      DateTime?
+  logisticsCompany String?
+  trackingNo       String?
+  // 订单维度汇总的售后状态（避免列表页为每单再查一次 AfterSale）
+  afterSaleStatus  String?     @db.VarChar(16)
+  // 该订单已退款总额（分）：用于校验超额退款
+  refundedAmount   Int         @default(0)
+  user             User        @relation(fields: [userId], references: [id])
+  items            OrderItem[]
+  afterSales       AfterSale[]
+  createdAt        DateTime    @default(now())
+}
+
+model OrderItem {
+  id          Int     @id @default(autoincrement())
+  orderId     Int
+  skuId       Int
+  productId   Int
+  productName String
+  specName    String
+  coverImage  String
+  price       Int
+  quantity    Int
+  order       Order   @relation(fields: [orderId], references: [id])
+  product     Product @relation(fields: [productId], references: [id])
+  sku         Sku     @relation(fields: [skuId], references: [id])
+}
+
+model Merchant {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String
+  nickname     String?
+  createdAt    DateTime @default(now())
+}
