@@ -49,6 +49,38 @@ export function resolveExpressCompany(nameOrCode: string): string {
   return EXPRESS_COMPANY_CODES[key] ?? key;
 }
 
+/**
+ * 物流模式，取值对齐微信 upload_shipping_info.logistics_type。
+ *
+ * 商家除了发快递，还会「同城跑腿送过去」或「让用户到店自提」。这两种场景没有快递单号，
+ * 如果只支持快递，商家就只能在后台瞎填一个假单号——既污染数据，用户侧物流也显示不对。
+ */
+export const LOGISTICS_TYPE = {
+  /** 实体物流配送（快递公司） */
+  EXPRESS: 1,
+  /** 同城配送（跑腿/自送） */
+  LOCAL_DELIVERY: 2,
+  /** 虚拟商品（话费、点卡等，本项目不使用） */
+  VIRTUAL: 3,
+  /** 用户自提 */
+  PICKUP: 4,
+} as const;
+
+export type LogisticsType = (typeof LOGISTICS_TYPE)[keyof typeof LOGISTICS_TYPE];
+
+/** 管控台/小程序展示用的文案 */
+export const LOGISTICS_TYPE_LABEL: Record<number, string> = {
+  1: '快递发货',
+  2: '同城配送',
+  3: '虚拟商品',
+  4: '用户自提',
+};
+
+/** 只有快递发货强制要求物流公司与单号 */
+export function requiresExpressInfo(type: number): boolean {
+  return type === LOGISTICS_TYPE.EXPRESS;
+}
+
 export interface ShippingUploadResult {
   ok: boolean;
   skipped?: string;
@@ -108,7 +140,29 @@ async function postWx<T extends { errcode?: number; errmsg?: string }>(
   }
 }
 
-/** 发货信息上报：把商家填写的物流信息上传微信（幂等友好：重复上报同单号微信会接受） */
+/** 从地址快照里取收件人手机号，作为 contact.receiver_contact（顺丰必填项） */
+function receiverContactOf(addressSnapshot: string): string | undefined {
+  try {
+    const addr = JSON.parse(addressSnapshot) as { phone?: string; receiverName?: string };
+    const phone = (addr.phone ?? '').trim();
+    return phone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 发货信息上报：把商家填写的发货信息上传微信。
+ *
+ * 微信的 logistics_type 决定 shipping_list 里哪些字段必填：
+ *   1 快递   → tracking_no + express_company 必填
+ *   2 同城   → 无快递单号，两者都可空
+ *   4 自提   → 无快递单号，两者都可空（提货码可选放在 tracking_no）
+ * item_desc 任何模式下都必填（错误码 10060008）。
+ *
+ * 注意：同一支付单修改「发货模式/物流模式」会被微信视为重新发货，且仅有一次机会，
+ * 所以类型在发货时就定好，后续不要随手改。
+ */
 export async function uploadShippingInfo(orderNo: string): Promise<ShippingUploadResult> {
   if (!env.wxAppid || !env.wxSecret) {
     return { ok: false, skipped: '未配置 WX_APPID / WX_APPSECRET' };
@@ -119,8 +173,10 @@ export async function uploadShippingInfo(orderNo: string): Promise<ShippingUploa
     include: { user: { select: { openid: true } }, items: true },
   });
   if (!order) return { ok: false, error: '订单不存在' };
-  if (!order.trackingNo || !order.logisticsCompany) {
-    return { ok: false, skipped: '订单还没有物流单号/快递公司' };
+
+  const logisticsType = order.logisticsType ?? LOGISTICS_TYPE.EXPRESS;
+  if (requiresExpressInfo(logisticsType) && (!order.trackingNo || !order.logisticsCompany)) {
+    return { ok: false, skipped: '快递发货缺少物流公司或单号' };
   }
   if (!order.paymentNo && !order.orderNo) {
     return { ok: false, skipped: '缺少可用于关联微信支付单的信息' };
@@ -131,21 +187,28 @@ export async function uploadShippingInfo(orderNo: string): Promise<ShippingUploa
     .join('；')
     .slice(0, 120);
 
+  // 快递：单号+快递公司编码；同城/自提：单号非必填（自提时若填了提货码就带上去）
+  const shippingItem: Record<string, unknown> = {
+    item_desc: itemDesc || '宠物用品',
+  };
+  if (logisticsType === LOGISTICS_TYPE.EXPRESS) {
+    shippingItem.tracking_no = order.trackingNo;
+    shippingItem.express_company = resolveExpressCompany(order.logisticsCompany ?? '');
+  } else if (order.trackingNo) {
+    shippingItem.tracking_no = order.trackingNo;
+  }
+  const contact = receiverContactOf(order.addressSnapshot);
+  if (contact) shippingItem.contact = { receiver_contact: contact };
+
   const payload = {
     // order_number_type: 1=商户单号（需 mchid） 2=微信支付单号
     order_key: order.paymentNo
       ? { order_number_type: 2, transaction_id: order.paymentNo }
       : { order_number_type: 1, mchid: env.pay.direct.mchid || env.pay.subMchId, out_trade_no: order.orderNo },
-    logistics_type: 1, // 1=物流快递
-    delivery_mode: 1, // 1=统一发货
-    shipping_list: [
-      {
-        tracking_no: order.trackingNo,
-        express_company: resolveExpressCompany(order.logisticsCompany),
-        item_desc: itemDesc || '宠物用品',
-        contact: { receiver_contact: order.addressSnapshot.slice(0, 60) },
-      },
-    ],
+    logistics_type: logisticsType,
+    // 非快递不允许分拆发货（错误码 10060006），统一发货即可
+    delivery_mode: 1,
+    shipping_list: [shippingItem],
     upload_time: new Date().toISOString().replace('Z', '+08:00'),
     payer: { openid: order.user.openid },
   };
@@ -159,7 +222,11 @@ export async function uploadShippingInfo(orderNo: string): Promise<ShippingUploa
       console.error(`[wx-shipping] 发货信息上报失败：errcode=${data.errcode} errmsg=${data.errmsg}`);
       return { ok: false, error: `微信返回 ${data.errcode}: ${data.errmsg ?? ''}` };
     }
-    console.log(`[wx-shipping] 发货信息上报成功：${orderNo} ${order.logisticsCompany}/${order.trackingNo}`);
+    const mode = LOGISTICS_TYPE_LABEL[logisticsType] ?? String(logisticsType);
+    console.log(
+      `[wx-shipping] 发货信息上报成功：${orderNo}（${mode}）` +
+        `${order.trackingNo ? ` ${order.logisticsCompany ?? ''}/${order.trackingNo}` : ''}`,
+    );
     return { ok: true };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

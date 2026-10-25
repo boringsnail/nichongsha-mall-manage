@@ -59,8 +59,16 @@
           <el-descriptions-item label="总金额">{{ fenToYuan(detail.totalAmount) }} 元</el-descriptions-item>
           <el-descriptions-item label="收货人">{{ detail.address.receiverName }} {{ detail.address.phone }}</el-descriptions-item>
           <el-descriptions-item label="收货地址">{{ detail.address.province }}{{ detail.address.city }}{{ detail.address.district }}{{ detail.address.detail }}</el-descriptions-item>
-          <el-descriptions-item label="物流" :span="2">
-            {{ detail.logisticsCompany ? `${detail.logisticsCompany} / ${detail.trackingNo}` : '未发货' }}
+          <el-descriptions-item label="发货方式" :span="2">
+            <template v-if="!detail.shippedAt">未发货</template>
+            <template v-else>
+              <el-tag size="small" effect="plain">{{ logisticsTypeText(detail.logisticsType) }}</el-tag>
+              <span v-if="detail.logisticsType === 1 && detail.trackingNo" class="logi-text">
+                {{ detail.logisticsCompany }} / {{ detail.trackingNo }}
+              </span>
+              <span v-else-if="detail.trackingNo" class="logi-text">单号：{{ detail.trackingNo }}</span>
+              <span v-else class="muted logi-text">无快递单号</span>
+            </template>
           </el-descriptions-item>
           <el-descriptions-item v-if="detail.remark" label="备注" :span="2">{{ detail.remark }}</el-descriptions-item>
         </el-descriptions>
@@ -85,14 +93,53 @@
     </el-dialog>
 
     <!-- 发货弹窗 -->
-    <el-dialog v-model="shipVisible" title="订单发货" width="420px">
-      <el-form :model="shipForm" label-width="80px">
-        <el-form-item label="物流公司" required>
-          <el-input v-model="shipForm.logisticsCompany" placeholder="如：顺丰速运" />
+    <el-dialog v-model="shipVisible" title="订单发货" width="480px">
+      <el-form :model="shipForm" label-width="90px">
+        <el-form-item label="发货方式" required>
+          <el-radio-group v-model="shipForm.logisticsType">
+            <el-radio-button :value="1">快递发货</el-radio-button>
+            <el-radio-button :value="2">同城配送</el-radio-button>
+            <el-radio-button :value="4">用户自提</el-radio-button>
+          </el-radio-group>
         </el-form-item>
-        <el-form-item label="物流单号" required>
-          <el-input v-model="shipForm.trackingNo" placeholder="如：SF1234567890" />
-        </el-form-item>
+
+        <!-- 快递：物流公司 + 单号都必填 -->
+        <template v-if="shipForm.logisticsType === 1">
+          <el-form-item label="物流公司" required>
+            <el-input v-model="shipForm.logisticsCompany" placeholder="如：顺丰速运" />
+          </el-form-item>
+          <el-form-item label="物流单号" required>
+            <el-input v-model="shipForm.trackingNo" placeholder="如：SF1234567890" />
+          </el-form-item>
+        </template>
+
+        <!-- 同城配送：没有快递单号，单号选填（跑腿/骑手单号） -->
+        <template v-else-if="shipForm.logisticsType === 2">
+          <el-form-item label="配送单号">
+            <el-input v-model="shipForm.trackingNo" placeholder="选填，如跑腿/骑手单号" />
+          </el-form-item>
+          <el-alert
+            class="ship-tip"
+            type="info"
+            :closable="false"
+            show-icon
+            title="同城配送无需快递单号，发货后用户会收到配送通知"
+          />
+        </template>
+
+        <!-- 用户自提：没有快递单号，可填提货码 -->
+        <template v-else>
+          <el-form-item label="提货码">
+            <el-input v-model="shipForm.trackingNo" placeholder="选填，用户凭此码到店自提" />
+          </el-form-item>
+          <el-alert
+            class="ship-tip"
+            type="info"
+            :closable="false"
+            show-icon
+            title="用户自提无需快递单号，请把提货码与提货门店告知用户"
+          />
+        </template>
       </el-form>
       <template #footer>
         <el-button @click="shipVisible = false">取消</el-button>
@@ -111,6 +158,7 @@ import {
   adminShipOrder,
   adminSyncOrderFromWechat,
   adminSyncOrdersFromWechat,
+  LOGISTICS_TYPE,
   type AdminOrderDetail,
   type AdminOrderRow,
   type OrderStatus,
@@ -126,6 +174,15 @@ const statusOptions: { label: string; value: OrderStatus }[] = [
 ];
 
 const statusText = (s: OrderStatus) => statusOptions.find((o) => o.value === s)?.label || s;
+
+/** 发货方式文案（1 快递 / 2 同城配送 / 3 虚拟商品 / 4 用户自提） */
+const LOGISTICS_TYPE_TEXT: Record<number, string> = {
+  1: '快递发货',
+  2: '同城配送',
+  3: '虚拟商品',
+  4: '用户自提',
+};
+const logisticsTypeText = (t: number | null | undefined) => LOGISTICS_TYPE_TEXT[t ?? 1] ?? '快递发货';
 
 /** 微信侧 order_state 文案（1待发货 2已发货 3确认收货 4交易完成 5已退款 6已关闭） */
 const WX_STATE_TEXT: Record<number, string> = {
@@ -235,28 +292,33 @@ async function openDetail(orderNo: string) {
 const shipVisible = ref(false);
 const shipping = ref(false);
 const shipOrderNo = ref('');
-const shipForm = reactive({ logisticsCompany: '', trackingNo: '' });
+// logisticsType 默认快递，和绝大多数订单一致；改成同城/自提时不再要求填快递单号
+const shipForm = reactive({ logisticsType: 1, logisticsCompany: '', trackingNo: '' });
 
 function openShip(orderNo: string) {
   shipOrderNo.value = orderNo;
+  shipForm.logisticsType = LOGISTICS_TYPE.EXPRESS;
   shipForm.logisticsCompany = '';
   shipForm.trackingNo = '';
   shipVisible.value = true;
 }
 
 async function submitShip() {
-  if (!shipForm.logisticsCompany.trim() || !shipForm.trackingNo.trim()) {
-    ElMessage.warning('请填写物流公司与单号');
+  const isExpress = shipForm.logisticsType === LOGISTICS_TYPE.EXPRESS;
+  if (isExpress && (!shipForm.logisticsCompany.trim() || !shipForm.trackingNo.trim())) {
+    ElMessage.warning('快递发货需要填写物流公司与物流单号');
     return;
   }
   shipping.value = true;
   try {
     await adminShipOrder(shipOrderNo.value, {
-      logisticsCompany: shipForm.logisticsCompany.trim(),
-      trackingNo: shipForm.trackingNo.trim(),
+      logisticsType: shipForm.logisticsType,
+      // 非快递模式后端会把物流公司写成「同城配送」/「用户自提」，这里不传公司
+      logisticsCompany: isExpress ? shipForm.logisticsCompany.trim() : undefined,
+      trackingNo: shipForm.trackingNo.trim() || undefined,
     });
     shipVisible.value = false;
-    ElMessage.success('已发货');
+    ElMessage.success(`已发货（${LOGISTICS_TYPE_TEXT[shipForm.logisticsType]}）`);
     load();
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '发货失败');
@@ -284,6 +346,12 @@ onMounted(load);
 }
 .sync-tip {
   align-self: center;
+}
+.ship-tip {
+  margin-bottom: 8px;
+}
+.logi-text {
+  margin-left: 8px;
 }
 .item-table {
   margin-top: 12px;

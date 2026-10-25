@@ -17,7 +17,23 @@ const listQuerySchema = validate({
 
 const shipSchema = validate({
   params: z.object({ orderNo: z.string().regex(/^NPA\d{16}$/) }),
-  body: z.object({ logisticsCompany: z.string().min(1), trackingNo: z.string().min(1) }),
+  body: z
+    .object({
+      // 物流模式：1 快递发货 / 2 同城配送 / 4 用户自提（3 虚拟商品本项目不使用）
+      // 缺省按快递处理，兼容老版前端只传公司与单号的请求
+      logisticsType: z.union([z.literal(1), z.literal(2), z.literal(4)]).default(1),
+      logisticsCompany: z.string().trim().max(64).optional(),
+      trackingNo: z.string().trim().max(128).optional(),
+    })
+    .superRefine((val, ctx) => {
+      if (val.logisticsType !== 1) return;
+      if (!val.logisticsCompany) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['logisticsCompany'], message: '快递发货需要填写物流公司' });
+      }
+      if (!val.trackingNo) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['trackingNo'], message: '快递发货需要填写物流单号' });
+      }
+    }),
 });
 
 adminOrdersRouter.get('/', listQuerySchema, asyncHandler(async (req, res) => {

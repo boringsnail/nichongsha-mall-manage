@@ -20,6 +20,8 @@ export interface AdminOrderDetail extends Omit<AdminOrderRow, 'itemCount'> {
   cancelledAt: string | null;
   logisticsCompany: string | null;
   trackingNo: string | null;
+  /** 物流模式：1 快递发货 / 2 同城配送 / 3 虚拟商品 / 4 用户自提 */
+  logisticsType: number;
   address: { receiverName: string; phone: string; province: string; city: string; district: string; detail: string };
   items: { productName: string; specName: string; coverImage: string; price: number; quantity: number }[];
 }
@@ -39,7 +41,23 @@ export function adminGetOrder(orderNo: string): Promise<AdminOrderDetail> {
   return api.get<AdminOrderDetail>(`/admin/orders/${orderNo}`);
 }
 
-export function adminShipOrder(orderNo: string, data: { logisticsCompany: string; trackingNo: string }): Promise<AdminOrderDetail> {
+/** 物流模式，取值对齐微信 upload_shipping_info.logistics_type */
+export const LOGISTICS_TYPE = {
+  EXPRESS: 1,
+  LOCAL_DELIVERY: 2,
+  VIRTUAL: 3,
+  PICKUP: 4,
+} as const;
+
+export interface ShipInput {
+  logisticsType: number;
+  /** 快递必填；同城配送/自提由后端写死为配送方式文案 */
+  logisticsCompany?: string;
+  /** 快递必填；自提时可选填提货码 */
+  trackingNo?: string;
+}
+
+export function adminShipOrder(orderNo: string, data: ShipInput): Promise<AdminOrderDetail> {
   return api.post<AdminOrderDetail>(`/admin/orders/${orderNo}/ship`, data);
 }
 

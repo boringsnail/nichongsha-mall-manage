@@ -223,6 +223,10 @@ model Order {
   cancelledAt      DateTime?
   logisticsCompany String?
   trackingNo       String?
+  // 物流模式（对齐微信 upload_shipping_info.logistics_type）：
+  //   1 快递发货 / 2 同城配送 / 3 虚拟商品（本项目不用）/ 4 用户自提
+  // 历史数据默认按快递处理，故给默认值 1 而不是可空。
+  logisticsType    Int         @default(1)
   // 订单维度汇总的售后状态（避免列表页为每单再查一次 AfterSale）
   afterSaleStatus  String?     @db.VarChar(16)
   // 该订单已退款总额（分）：用于校验超额退款

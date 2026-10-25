@@ -1,7 +1,7 @@
 import { prisma } from '../db.js';
 import { notFound, orderIllegal } from '../utils/HttpError.js';
 import { syncFulfillmentQuietly } from './orderService.js';
-import { getWechatOrderState } from './shippingService.js';
+import { getWechatOrderState, LOGISTICS_TYPE, LOGISTICS_TYPE_LABEL } from './shippingService.js';
 
 export async function listAdminOrders(query: { status?: string; page?: number; size?: number }) {
   const page = Math.max(1, query.page ?? 1);
@@ -63,6 +63,7 @@ export async function getAdminOrderDetail(orderNo: string) {
     createdAt: order.createdAt,
     logisticsCompany: order.logisticsCompany,
     trackingNo: order.trackingNo,
+    logisticsType: order.logisticsType,
     address: JSON.parse(order.addressSnapshot),
     items: order.items.map((i) => ({
       productName: i.productName,
@@ -75,9 +76,33 @@ export async function getAdminOrderDetail(orderNo: string) {
 }
 
 // 发货：仅 PAID → SHIPPED；条件更新防并发
-export async function shipOrder(orderNo: string, data: { logisticsCompany: string; trackingNo: string }) {
+export interface ShipInput {
+  /** 1 快递 / 2 同城配送 / 4 用户自提 */
+  logisticsType: number;
+  logisticsCompany?: string;
+  trackingNo?: string;
+}
+
+export async function shipOrder(orderNo: string, data: ShipInput) {
   const order = await prisma.order.findUnique({ where: { orderNo } });
   if (!order) throw notFound('订单不存在');
+
+  const logisticsType = data.logisticsType ?? LOGISTICS_TYPE.EXPRESS;
+  if (!LOGISTICS_TYPE_LABEL[logisticsType]) throw orderIllegal('不支持的物流模式');
+  if (logisticsType === LOGISTICS_TYPE.VIRTUAL) {
+    throw orderIllegal('虚拟商品发货请走专门流程，实体商品请选择快递/同城配送/用户自提');
+  }
+
+  // 快递才需要公司与单号；同城配送、用户自提没有快递单号，
+  // 物流公司字段直接写配送方式文案，小程序端展示才不会空着。
+  const trackingNo = data.trackingNo?.trim() || null;
+  const logisticsCompany =
+    logisticsType === LOGISTICS_TYPE.EXPRESS
+      ? (data.logisticsCompany ?? '').trim()
+      : LOGISTICS_TYPE_LABEL[logisticsType];
+  if (logisticsType === LOGISTICS_TYPE.EXPRESS && (!logisticsCompany || !trackingNo)) {
+    throw orderIllegal('快递发货需要填写物流公司和物流单号');
+  }
 
   // 发货前先对账一次：若商家已经在微信后台录过发货，本地状态会变成已发货，
   // 下面就会拦住重复发货（否则同一单会向微信上报两个不同单号，用户侧物流对不上）。
@@ -90,7 +115,13 @@ export async function shipOrder(orderNo: string, data: { logisticsCompany: strin
 
   const updated = await prisma.order.updateMany({
     where: { orderNo, status: 'PAID' },
-    data: { status: 'SHIPPED', shippedAt: new Date(), logisticsCompany: data.logisticsCompany, trackingNo: data.trackingNo },
+    data: {
+      status: 'SHIPPED',
+      shippedAt: new Date(),
+      logisticsType,
+      logisticsCompany,
+      trackingNo,
+    },
   });
   if (updated.count !== 1) throw orderIllegal('订单状态已变化');
   // 实物交易合规：发货后必须把物流信息上报微信「订单发货管理」。
