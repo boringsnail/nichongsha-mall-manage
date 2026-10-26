@@ -132,7 +132,7 @@ async function onSubmit() {
   height: 34px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(46, 230, 197, 0.5);
+  border: 1px solid var(--signal-border);
   color: var(--signal);
   font-size: 16px;
   font-weight: 600;

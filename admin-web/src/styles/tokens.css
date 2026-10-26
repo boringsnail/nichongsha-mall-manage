@@ -1,40 +1,73 @@
 /* ============================================================================
    你宠啥 · 商家调度台 —— 设计令牌
    ----------------------------------------------------------------------------
-   气质：工业控制台。深石板底 + 发丝线 + 等宽数字；颜色只留给「状态」，
-   界面本身近乎无彩。直角、无阴影、无毛玻璃——高级感来自密度、对齐与克制。
+   两套主题，同一套变量名：
+     浅色（默认）「雾白 Mist」——中性灰白，青绿只做信号色，长时间看不累
+     深色「石墨 Graphite」——夜间模式，深石板底 + 发丝线
+
+   约定：颜色只留给「状态」（信号/警示/危险），界面本身近乎无彩。
+   直角、无渐变、无毛玻璃——高级感来自密度、对齐与克制。
+
+   切换方式：给 <html> 加/去 class="dark"。首屏由 index.html 的内联脚本
+   在绘制前写好，避免白闪（详见 index.html）。
    ========================================================================== */
 
+/* ------------------------------------------------------------ 浅色（默认） */
 :root {
-  /* 色板：冷石板灰阶（偏蓝），不是纯黑 */
-  --ink-950: #070a0c;
-  --ink-900: #0a0f12; /* 页面底 */
-  --ink-880: #0d1317; /* 侧栏 */
-  --ink-850: #111a1e; /* 面板 */
-  --ink-820: #162127; /* 浮层 / 悬浮 */
-  --ink-780: #1b272e; /* 输入框 */
-  --ink-740: #22303a; /* 强调底 */
+  color-scheme: light;
+
+  /* 表面层级：从最深的阴影基底到最亮的浮层 */
+  --ink-950: #dfe5ec;
+  --ink-900: #f2f4f7; /* 页面底 */
+  --ink-880: #fafbfc; /* 侧栏 / 表头 / 输入框底 */
+  --ink-850: #ffffff; /* 面板 */
+  --ink-820: #ffffff; /* 浮层 / 卡片 */
+  --ink-780: #f5f7fa; /* 次级填充 */
+  --ink-740: #e9edf2; /* 强调底 */
 
   /* 发丝线三档：分隔、边界、强调边界 */
-  --line-1: #1c272e;
-  --line-2: #27353d;
-  --line-3: #384a54;
+  --line-1: #e4e8ee;
+  --line-2: #d3d9e2;
+  --line-3: #b9c2cf;
 
-  /* 文本三档 */
-  --text-hi: #e9f1f5;
-  --text-mid: #9cb0bb;
-  --text-lo: #61747f;
+  /* 文本三档：lo 也压到 4.5:1 以上——10~11px 的小标签用得多，太浅就真读不清了 */
+  --text-hi: #101419;
+  --text-mid: #4a5563;
+  --text-lo: #66707f;
+  /* 比 mid 深、比 hi 浅：按钮/正文默认字色 */
+  --text-regular: #333c47;
 
-  /* 信号色：主信号只有一个（工业青绿），其余只用于告警语义 */
-  --signal: #2ee6c5;
-  --signal-ink: #04201b; /* 信号色上的文字 */
-  --signal-soft: rgba(46, 230, 197, 0.12);
-  --amber: #f5b544;
-  --amber-soft: rgba(245, 181, 68, 0.12);
-  --red: #ff5f57;
-  --red-soft: rgba(255, 95, 87, 0.12);
-  --blue: #6aa8ff;
-  --blue-soft: rgba(106, 168, 255, 0.12);
+  /* 信号色：主信号只有一个（青绿），其余只用于告警语义。
+   * 浅色下的取值都按「既当字色、又当实心底」校准过：白字压在上面 ≥4.5:1，
+   * 自己当文字压在白底/浅底上也 ≥4.5:1。深色主题另有一套更亮的取值。 */
+  --signal: #0a7566;
+  --signal-hover: #086357;
+  --signal-active: #064f45;
+  --signal-ink: #ffffff;
+  --signal-soft: rgba(10, 117, 102, 0.1);
+  --signal-border: rgba(10, 117, 102, 0.34);
+  /* 刚变更那一行的高亮底色：比 soft 明显一档，否则在纯白上根本看不出来 */
+  --signal-flash: rgba(10, 117, 102, 0.16);
+  --amber: #8f5c09;
+  --amber-soft: rgba(143, 92, 9, 0.1);
+  --amber-border: rgba(143, 92, 9, 0.32);
+  --red: #c03333;
+  --red-soft: rgba(192, 51, 51, 0.09);
+  --red-border: rgba(192, 51, 51, 0.3);
+  /* 实心红底上的字色：浅色下用白，深色下亮红配近黑 */
+  --red-ink: #ffffff;
+  --blue: #2457cc;
+  --blue-soft: rgba(36, 87, 204, 0.09);
+  --blue-border: rgba(36, 87, 204, 0.3);
+
+  /* 交互态：悬浮/选中的浅底，浅色下是灰、深色下是亮一档的面 */
+  --hover: #f3f6f9;
+  /* 输入框底：浅色下纯白（靠发丝线区分），深色下比面板再暗一档（内嵌感） */
+  --field-bg: #ffffff;
+  --grid-line: rgba(16, 20, 25, 0.045);
+  --btn-inset: rgba(255, 255, 255, 0.6);
+  --shadow-1: 0 1px 2px rgba(16, 20, 25, 0.04), 0 10px 28px rgba(16, 20, 25, 0.07);
+  --shadow-2: 0 14px 36px rgba(16, 20, 25, 0.16);
 
   /* 排版：中文走系统字，数字与标签走等宽（仪表读数感） */
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
@@ -62,6 +95,53 @@
   --head-h: 56px;
 }
 
+/* ------------------------------------------------------------ 深色（夜间） */
+html.dark {
+  color-scheme: dark;
+
+  --ink-950: #070a0c;
+  --ink-900: #0a0f12;
+  --ink-880: #0d1317;
+  --ink-850: #111a1e;
+  --ink-820: #162127;
+  --ink-780: #1b272e;
+  --ink-740: #22303a;
+
+  --line-1: #1c272e;
+  --line-2: #27353d;
+  --line-3: #384a54;
+
+  --text-hi: #e9f1f5;
+  --text-mid: #9cb0bb;
+  --text-lo: #61747f;
+  --text-regular: #c2d2db;
+
+  --signal: #2ee6c5;
+  --signal-hover: #58eed3;
+  --signal-active: #22c1a5;
+  --signal-ink: #04201b;
+  --signal-soft: rgba(46, 230, 197, 0.12);
+  --signal-border: rgba(46, 230, 197, 0.32);
+  --signal-flash: rgba(46, 230, 197, 0.16);
+  --amber: #f5b544;
+  --amber-soft: rgba(245, 181, 68, 0.12);
+  --amber-border: rgba(245, 181, 68, 0.32);
+  --red: #ff5f57;
+  --red-soft: rgba(255, 95, 87, 0.12);
+  --red-border: rgba(255, 95, 87, 0.32);
+  --red-ink: #2a0705;
+  --blue: #6aa8ff;
+  --blue-soft: rgba(106, 168, 255, 0.12);
+  --blue-border: rgba(106, 168, 255, 0.32);
+
+  --hover: #162127;
+  --field-bg: #0d1317;
+  --grid-line: rgba(233, 241, 245, 0.03);
+  --btn-inset: rgba(255, 255, 255, 0.04);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.45);
+  --shadow-2: 0 18px 40px rgba(0, 0, 0, 0.55);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -81,6 +161,8 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* 切主题时整页淡入，避免颜色瞬间翻转的突兀感 */
+  transition: background-color var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
 }
 
 ::selection {
@@ -203,8 +285,8 @@ body {
 
 /* 工程网格底：仅用于登录页等大面积空白，透明度压到几乎看不见 */
 .grid-backdrop {
-  background-image: linear-gradient(to right, rgba(233, 241, 245, 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(233, 241, 245, 0.03) 1px, transparent 1px);
+  background-image: linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
   background-size: 44px 44px;
 }
 
@@ -234,22 +316,22 @@ body {
 }
 .pill-signal {
   color: var(--signal);
-  border-color: rgba(46, 230, 197, 0.32);
+  border-color: var(--signal-border);
   background: var(--signal-soft);
 }
 .pill-amber {
   color: var(--amber);
-  border-color: rgba(245, 181, 68, 0.32);
+  border-color: var(--amber-border);
   background: var(--amber-soft);
 }
 .pill-red {
   color: var(--red);
-  border-color: rgba(255, 95, 87, 0.32);
+  border-color: var(--red-border);
   background: var(--red-soft);
 }
 .pill-blue {
   color: var(--blue);
-  border-color: rgba(106, 168, 255, 0.32);
+  border-color: var(--blue-border);
   background: var(--blue-soft);
 }
 .pill-mute {

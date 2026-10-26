@@ -29,10 +29,10 @@
       <el-table-column label="单价（元）" width="110">
         <template #default="{ row }">{{ fenToYuan(row.price) }}</template>
       </el-table-column>
-      <el-table-column label="当前库存" width="180">
+      <el-table-column label="当前库存" width="196">
         <template #default="{ row }">
           <div class="stock-cell">
-            <el-input-number v-model="row.stock" :min="0" :max="999999" size="small" controls-position="right" style="width: 140px" />
+            <el-input-number v-model="row.stock" :min="0" :max="999999" size="small" controls-position="right" style="width: 132px" />
             <el-tag v-if="row.stock <= 10" type="danger" size="small">低</el-tag>
           </div>
         </template>

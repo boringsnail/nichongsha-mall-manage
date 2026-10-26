@@ -73,7 +73,7 @@ function goto(item: AlertItem) {
   background: var(--amber);
 }
 .alert-card.after-sale {
-  border-color: rgba(245, 181, 68, 0.32);
+  border-color: var(--amber-border);
 }
 
 .body {

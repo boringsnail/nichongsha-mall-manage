@@ -9,9 +9,16 @@ import {
   autoConfirmDays,
 } from './services/orderService.js';
 import { autoProgressAfterSales, alertOverdueAfterSales, reconcileRefundingAfterSales } from './services/afterSaleService.js';
+import { refreshConfigCache } from './services/configService.js';
 
 const HOST = process.env.HOST ?? '0.0.0.0';
 const app = createApp();
+
+// 先把后台配置读进内存：售后超时判定、自动同意开关、C 端公告都读这份缓存。
+// 不阻塞监听——读失败会退回默认值，只是日志里多一条 warn。
+refreshConfigCache()
+  .then(() => console.log('[config] 后台配置已加载'))
+  .catch(() => {});
 
 const server = app.listen(env.port, HOST, () => {
   console.log(`[nichongsha-server] listening on http://${HOST}:${env.port}`);

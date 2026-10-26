@@ -1,23 +1,31 @@
 /* ============================================================================
-   Element Plus · 工业控制台主题
+   Element Plus · 双主题（雾白 / 石墨）
    ----------------------------------------------------------------------------
-   做法：开启 EP 深色模式（html.dark），再用自有令牌覆盖其 CSS 变量，
-   最后只对「必须改形状」的组件（表格、按钮、输入、弹窗、分页）做定点重写。
-   这样所有业务页面无需逐个改样式就能统一。
+   做法：把 EP 的 CSS 变量按主题映射到自有令牌（浅色在 :root、深色在 html.dark），
+   再对「必须改形状」的组件（表格、按钮、输入、弹窗、分页）做定点重写。
+   这样所有业务页面无需逐个改样式，切主题也只是换一组变量。
    ========================================================================== */
 
-html.dark {
-  /* ---- 基础面 ---- */
+/* 形状、字体：两套主题共用 */
+:root {
+  --el-border-radius-base: 2px;
+  --el-border-radius-small: 2px;
+  --el-border-radius-round: 999px;
+  --el-font-family: var(--font-sans);
+  --el-font-size-base: 13px;
+  --el-font-size-small: 12px;
+  --el-font-size-extra-small: 11px;
+
+  /* ---- 浅色面（雾白） ---- */
   --el-bg-color: var(--ink-850);
   --el-bg-color-page: var(--ink-900);
   --el-bg-color-overlay: var(--ink-820);
   --el-text-color-primary: var(--text-hi);
-  --el-text-color-regular: #c2d2db;
+  --el-text-color-regular: var(--text-regular);
   --el-text-color-secondary: var(--text-mid);
   --el-text-color-placeholder: var(--text-lo);
-  --el-text-color-disabled: #4a5a64;
+  --el-text-color-disabled: #b3bbc6;
 
-  /* ---- 线 ---- */
   --el-border-color: var(--line-2);
   --el-border-color-light: var(--line-1);
   --el-border-color-lighter: var(--line-1);
@@ -26,9 +34,85 @@ html.dark {
   --el-border-color-darker: var(--line-3);
   --el-border-color-hover: var(--line-3);
 
-  /* ---- 填充 ---- */
   --el-fill-color: var(--ink-780);
-  --el-fill-color-light: var(--ink-820);
+  --el-fill-color-light: var(--hover);
+  --el-fill-color-lighter: var(--ink-850);
+  --el-fill-color-extra-light: var(--ink-880);
+  --el-fill-color-dark: var(--ink-740);
+  --el-fill-color-darker: var(--ink-740);
+  --el-fill-color-blank: var(--ink-850);
+
+  --el-mask-color: rgba(16, 20, 25, 0.42);
+  --el-mask-color-extra-light: rgba(16, 20, 25, 0.1);
+
+  --el-box-shadow: 0 14px 36px rgba(16, 20, 25, 0.14);
+  --el-box-shadow-light: 0 8px 24px rgba(16, 20, 25, 0.1);
+  --el-box-shadow-lighter: 0 4px 12px rgba(16, 20, 25, 0.08);
+  --el-box-shadow-dark: 0 18px 44px rgba(16, 20, 25, 0.18);
+
+  /* ---- 语义色：主色青绿；light-N 在浅色下是「掺白」，深色下是「掺黑」 ---- */
+  --el-color-primary: #0a7566;
+  --el-color-primary-light-3: #549e94;
+  --el-color-primary-light-5: #85bab3;
+  --el-color-primary-light-7: #b6d6d1;
+  --el-color-primary-light-8: #cee3e0;
+  --el-color-primary-light-9: #e7f1f0;
+  --el-color-primary-dark-2: #085e52;
+
+  --el-color-success: #0a7566;
+  --el-color-success-light-3: #549e94;
+  --el-color-success-light-5: #85bab3;
+  --el-color-success-light-7: #b6d6d1;
+  --el-color-success-light-8: #cee3e0;
+  --el-color-success-light-9: #e7f1f0;
+  --el-color-success-dark-2: #085e52;
+
+  --el-color-warning: #8f5c09;
+  --el-color-warning-light-3: #b18d53;
+  --el-color-warning-light-5: #c7ae84;
+  --el-color-warning-light-7: #ddceb5;
+  --el-color-warning-light-8: #e9dece;
+  --el-color-warning-light-9: #f4efe6;
+  --el-color-warning-dark-2: #724a07;
+
+  --el-color-danger: #c03333;
+  --el-color-danger-light-3: #d37070;
+  --el-color-danger-light-5: #e09999;
+  --el-color-danger-light-7: #ecc2c2;
+  --el-color-danger-light-8: #f2d6d6;
+  --el-color-danger-light-9: #f9ebeb;
+  --el-color-danger-dark-2: #9a2929;
+
+  --el-color-error: #c03333;
+  --el-color-error-light-3: #d37070;
+  --el-color-error-light-5: #e09999;
+  --el-color-error-light-7: #ecc2c2;
+  --el-color-error-light-8: #f2d6d6;
+  --el-color-error-light-9: #f9ebeb;
+  --el-color-error-dark-2: #9a2929;
+
+  --el-color-info: #6b7684;
+  --el-color-info-light-3: #979fa9;
+  --el-color-info-light-5: #b5bac1;
+  --el-color-info-light-7: #d2d5da;
+  --el-color-info-light-8: #e1e3e6;
+  --el-color-info-light-9: #eff1f3;
+  --el-color-info-dark-2: #565e6a;
+}
+
+/* ---- 深色面（石墨 · 夜间模式）：只覆盖颜色，形状与字体沿用 :root ---- */
+html.dark {
+  --el-bg-color: var(--ink-850);
+  --el-bg-color-page: var(--ink-900);
+  --el-bg-color-overlay: var(--ink-820);
+  --el-text-color-primary: var(--text-hi);
+  --el-text-color-regular: var(--text-regular);
+  --el-text-color-secondary: var(--text-mid);
+  --el-text-color-placeholder: var(--text-lo);
+  --el-text-color-disabled: #4a5a64;
+
+  --el-fill-color: var(--ink-780);
+  --el-fill-color-light: var(--hover);
   --el-fill-color-lighter: var(--ink-850);
   --el-fill-color-extra-light: var(--ink-880);
   --el-fill-color-dark: var(--ink-740);
@@ -38,21 +122,11 @@ html.dark {
   --el-mask-color: rgba(3, 6, 8, 0.74);
   --el-mask-color-extra-light: rgba(3, 6, 8, 0.3);
 
-  /* ---- 形状与字体：直角 + 等宽读数 ---- */
-  --el-border-radius-base: 2px;
-  --el-border-radius-small: 2px;
-  --el-border-radius-round: 999px;
-  --el-font-family: var(--font-sans);
-  --el-font-size-base: 13px;
-  --el-font-size-small: 12px;
-  --el-font-size-extra-small: 11px;
-
   --el-box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
   --el-box-shadow-light: 0 8px 24px rgba(0, 0, 0, 0.45);
   --el-box-shadow-lighter: 0 4px 12px rgba(0, 0, 0, 0.35);
   --el-box-shadow-dark: 0 16px 48px rgba(0, 0, 0, 0.6);
 
-  /* ---- 语义色：主色是工业青绿，light-N 在深色下是「越来越暗的混色」 ---- */
   --el-color-primary: #2ee6c5;
   --el-color-primary-light-3: #29c9ac;
   --el-color-primary-light-5: #22a58e;
@@ -112,7 +186,7 @@ html.dark {
     color var(--dur-1) var(--ease);
 }
 .el-button:not(.is-link):not(.is-text) {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0 var(--btn-inset);
 }
 
 /* 主操作：信号色实心 + 深色字，像设备上的确认键 */
@@ -120,11 +194,11 @@ html.dark {
   --el-button-bg-color: var(--signal);
   --el-button-border-color: var(--signal);
   --el-button-text-color: var(--signal-ink);
-  --el-button-hover-bg-color: #58eed3;
-  --el-button-hover-border-color: #58eed3;
+  --el-button-hover-bg-color: var(--signal-hover);
+  --el-button-hover-border-color: var(--signal-hover);
   --el-button-hover-text-color: var(--signal-ink);
-  --el-button-active-bg-color: #22c1a5;
-  --el-button-active-border-color: #22c1a5;
+  --el-button-active-bg-color: var(--signal-active);
+  --el-button-active-border-color: var(--signal-active);
   --el-button-active-text-color: var(--signal-ink);
 }
 
@@ -132,8 +206,8 @@ html.dark {
 .el-button--default {
   --el-button-bg-color: transparent;
   --el-button-border-color: var(--line-2);
-  --el-button-text-color: #c2d2db;
-  --el-button-hover-bg-color: var(--ink-820);
+  --el-button-text-color: var(--text-regular);
+  --el-button-hover-bg-color: var(--hover);
   --el-button-hover-border-color: var(--line-3);
   --el-button-hover-text-color: var(--text-hi);
   --el-button-active-bg-color: var(--ink-780);
@@ -152,7 +226,7 @@ html.dark {
 
 .el-input__wrapper,
 .el-textarea__inner {
-  background-color: var(--ink-880);
+  background-color: var(--field-bg);
   box-shadow: 0 0 0 1px var(--line-2) inset;
   border-radius: var(--r-1);
   transition: box-shadow var(--dur-1) var(--ease);
@@ -178,7 +252,7 @@ html.dark {
 }
 
 .el-select__wrapper {
-  background-color: var(--ink-880);
+  background-color: var(--field-bg);
   box-shadow: 0 0 0 1px var(--line-2) inset;
   border-radius: var(--r-1);
 }
@@ -228,8 +302,8 @@ html.dark {
   --el-table-header-bg-color: var(--ink-880);
   --el-table-tr-bg-color: transparent;
   --el-table-bg-color: transparent;
-  --el-table-row-hover-bg-color: var(--ink-820);
-  --el-table-text-color: #c2d2db;
+  --el-table-row-hover-bg-color: var(--hover);
+  --el-table-text-color: var(--text-regular);
   --el-table-header-text-color: var(--text-mid);
   background: transparent;
   font-size: 12.5px;
@@ -245,7 +319,7 @@ html.dark {
   font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--text-lo);
+  color: var(--text-mid);
   white-space: nowrap;
 }
 .el-table td.el-table__cell {
@@ -289,28 +363,28 @@ html.dark {
 }
 .el-tag--primary {
   color: var(--signal);
-  border-color: rgba(46, 230, 197, 0.32);
+  border-color: var(--signal-border);
   background: var(--signal-soft);
 }
 .el-tag--success {
   color: var(--signal);
-  border-color: rgba(46, 230, 197, 0.32);
+  border-color: var(--signal-border);
   background: var(--signal-soft);
 }
 .el-tag--warning {
   color: var(--amber);
-  border-color: rgba(245, 181, 68, 0.32);
+  border-color: var(--amber-border);
   background: var(--amber-soft);
 }
 .el-tag--danger {
   color: var(--red);
-  border-color: rgba(255, 95, 87, 0.32);
+  border-color: var(--red-border);
   background: var(--red-soft);
 }
 .el-tag--info {
   color: var(--text-mid);
   border-color: var(--line-2);
-  background: rgba(157, 176, 187, 0.06);
+  background: var(--hover);
 }
 .el-tag--dark {
   background: var(--signal);
@@ -320,7 +394,7 @@ html.dark {
 .el-tag--dark.el-tag--danger {
   background: var(--red);
   border-color: var(--red);
-  color: #1a0503;
+  color: var(--red-ink);
 }
 
 /* ------------------------------------------------------------------ 卡片 */
@@ -459,10 +533,10 @@ html.dark {
   font-size: 12.5px;
 }
 .el-message--success {
-  border-color: rgba(46, 230, 197, 0.35);
+  border-color: var(--signal-border);
 }
 .el-message--error {
-  border-color: rgba(255, 95, 87, 0.35);
+  border-color: var(--red-border);
 }
 
 .el-message-box {
@@ -493,7 +567,7 @@ html.dark {
 }
 .el-alert--error.is-light {
   background: var(--red-soft);
-  border-color: rgba(255, 95, 87, 0.32);
+  border-color: var(--red-border);
   color: var(--red);
 }
 

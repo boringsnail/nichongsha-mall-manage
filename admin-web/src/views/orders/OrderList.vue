@@ -3,20 +3,32 @@
     <div class="cmdbar">
       <div class="cmd-left">
         <span class="label">filter</span>
-        <el-select v-model="status" placeholder="全部状态" clearable style="width: 150px" @change="load">
+        <el-select v-model="status" placeholder="全部状态" clearable style="width: 150px" @change="onStatusChange">
           <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
         </el-select>
-        <el-button type="primary" @click="load">查询</el-button>
+        <el-button type="primary" @click="onQuery">查询</el-button>
       </div>
       <div class="cmd-right">
-        <span class="mono sync-tip">微信后台录的发货不会回调本系统，需手动拉取</span>
-        <el-button :loading="syncing" @click="syncAll">同步微信状态</el-button>
+        <!-- 自动同步：默认开，5 秒一轮，服务端对单笔订单做 30 秒节流，不会打爆微信接口 -->
+        <div
+          class="auto-pill"
+          :class="{ off: !autoSync, warn: autoSync && !autoOk }"
+          :title="autoSync ? '每 5 秒自动拉取一次微信侧最新状态' : '已暂停自动同步'"
+        >
+          <span class="auto-dot" />
+          <span class="mono">自动同步 5s</span>
+          <span v-if="lastSyncText" class="mono auto-time">{{ lastSyncText }}</span>
+          <el-switch v-model="autoSync" size="small" />
+        </div>
+        <el-button :loading="syncing" @click="syncAll">立即全量同步</el-button>
       </div>
     </div>
 
-    <el-table v-loading="loading" :data="rows" class="order-table">
+    <el-table v-loading="loading" :data="rows" class="order-table" :row-class-name="rowClass">
       <el-table-column prop="orderNo" label="订单号" width="190" />
-      <el-table-column label="用户" width="168">
+      <!-- 用户列用 min-width：宽屏时它吸收剩余宽度，操作列才会贴住右边缘，
+           否则表格右侧会空出一条白带（fixed 列没有溢出可贴） -->
+      <el-table-column label="用户" min-width="168">
         <template #default="{ row }">
           <div>{{ row.user.nickname || '微信用户' }}</div>
           <div class="muted uid" :title="row.user.openid">{{ row.user.openid }}</div>
@@ -164,7 +176,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import {
@@ -262,17 +274,134 @@ const page = ref(1);
 const size = ref(10);
 const total = ref(0);
 
-async function load() {
-  loading.value = true;
+/* ------------------------------------------------------------------ 自动同步
+ * 商家最怕「微信那边已经退款/已发货，后台还显示旧状态」，所以列表默认每 5 秒
+ * 主动对一次账。服务端 syncFulfillmentQuietly 对单笔订单有 30 秒节流，一页 10 单
+ * 折下来约 0.33 QPS，不会把微信接口打爆；同时只同步 PAID/SHIPPED 这类活跃单。
+ */
+const AUTO_SYNC_KEY = 'order_auto_sync';
+const AUTO_SYNC_MS = 5000;
+
+function readAutoSync(): boolean {
   try {
-    const data = await adminListOrders({ page: page.value, size: size.value, status: status.value || undefined });
+    return localStorage.getItem(AUTO_SYNC_KEY) !== '0';
+  } catch {
+    // 隐私模式下 localStorage 会抛错，默认开着即可
+    return true;
+  }
+}
+
+const autoSync = ref(readAutoSync());
+/** 最近一次同步的时钟（优先用服务端时间，避免本机时区/时间不准） */
+const lastSyncText = ref('');
+/** 静默轮询失败时把指示点变琥珀色，但不弹 toast —— 网络抖一下就弹会被烦死 */
+const autoOk = ref(true);
+/** 刚发生状态变化的订单号，用来给整行做一次高亮 */
+const flash = ref<Set<string>>(new Set());
+let flashTimer: number | undefined;
+let timer: number | undefined;
+let ticking = false;
+
+function clockText(iso?: string): string {
+  const d = iso ? new Date(iso) : new Date();
+  const t = Number.isNaN(d.getTime()) ? new Date() : d;
+  return t.toLocaleTimeString('zh-CN', { hour12: false });
+}
+
+/** 对比上一轮数据，把「状态或售后状态变了」的订单挑出来闪一下 */
+function markChanged(next: AdminOrderRow[]) {
+  if (!rows.value.length) return;
+  const prev = new Map(rows.value.map((r) => [r.orderNo, r]));
+  const changed: string[] = [];
+  for (const r of next) {
+    const old = prev.get(r.orderNo);
+    if (!old) continue;
+    if (old.status !== r.status || old.afterSaleStatus !== r.afterSaleStatus) changed.push(r.orderNo);
+  }
+  if (!changed.length) return;
+  flash.value = new Set(changed);
+  window.clearTimeout(flashTimer);
+  flashTimer = window.setTimeout(() => {
+    flash.value = new Set();
+  }, 2600);
+}
+
+/** el-table 的行 class 钩子：刚变过状态的行给 2.6 秒高亮，让商家一眼看到变化 */
+function rowClass({ row }: { row: AdminOrderRow }): string {
+  return flash.value.has(row.orderNo) ? 'row-flash' : '';
+}
+
+async function load(opts: { silent?: boolean; withSync?: boolean } = {}) {
+  const { silent = false, withSync = false } = opts;
+  if (!silent) loading.value = true;
+  try {
+    const data = await adminListOrders({
+      page: page.value,
+      size: size.value,
+      status: status.value || undefined,
+      ...(withSync ? { autoSync: 1 as const } : {}),
+    });
+    if (withSync) markChanged(data.list);
     rows.value = data.list;
     total.value = data.total;
+    lastSyncText.value = clockText(data.serverTime);
+    autoOk.value = true;
   } catch (e) {
-    ElMessage.error(e instanceof Error ? e.message : '加载失败');
+    autoOk.value = false;
+    if (!silent) ElMessage.error(e instanceof Error ? e.message : '加载失败');
   } finally {
-    loading.value = false;
+    if (!silent) loading.value = false;
   }
+}
+
+/** 一轮自动同步：切到后台标签页、或弹窗开着时跳过，别和用户抢内容 */
+async function tick() {
+  if (!autoSync.value || ticking) return;
+  if (document.hidden) return;
+  if (detailVisible.value || shipVisible.value) return;
+  ticking = true;
+  try {
+    await load({ silent: true, withSync: true });
+  } finally {
+    ticking = false;
+  }
+}
+
+function startTimer() {
+  if (timer) return;
+  timer = window.setInterval(tick, AUTO_SYNC_MS);
+}
+function stopTimer() {
+  if (!timer) return;
+  window.clearInterval(timer);
+  timer = undefined;
+}
+
+watch(autoSync, (on) => {
+  try {
+    localStorage.setItem(AUTO_SYNC_KEY, on ? '1' : '0');
+  } catch {
+    /* 存不了就算了，不影响本次会话 */
+  }
+  if (on) {
+    startTimer();
+    tick(); // 刚打开就立刻对一次，不用等 5 秒
+  } else {
+    stopTimer();
+  }
+});
+
+/** 从后台切回来时立刻补一次，避免商家看到几分钟前的旧状态 */
+function onVisible() {
+  if (!document.hidden && autoSync.value) tick();
+}
+
+function onStatusChange() {
+  page.value = 1;
+  load();
+}
+function onQuery() {
+  load();
 }
 
 function onPage(p: number) {
@@ -376,9 +505,17 @@ async function submitShip() {
 
 // 告警卡片的「去处理」会带 ?orderNo=xxx 跳进来，直接打开详情，省一次手动搜索
 onMounted(async () => {
-  await load();
+  await load({ withSync: true });
   const target = typeof route.query.orderNo === 'string' ? route.query.orderNo : '';
   if (target) openDetail(target);
+  startTimer();
+  document.addEventListener('visibilitychange', onVisible);
+});
+
+onBeforeUnmount(() => {
+  stopTimer();
+  window.clearTimeout(flashTimer);
+  document.removeEventListener('visibilitychange', onVisible);
 });
 </script>
 
@@ -396,10 +533,76 @@ onMounted(async () => {
   align-items: center;
   gap: 10px;
 }
-.sync-tip {
-  font-size: 10.5px;
-  color: var(--text-lo);
+/* 自动同步指示条：形状跟按钮同高，切换开关放在最右，扫一眼就知道现在同没同步 */
+.auto-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  background: var(--ink-850);
+  font-size: 11px;
   letter-spacing: 0.04em;
+  color: var(--text-mid);
+  user-select: none;
+  transition:
+    border-color var(--dur-1) var(--ease),
+    background-color var(--dur-1) var(--ease);
+}
+.auto-pill:hover {
+  border-color: var(--line-3);
+}
+.auto-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-soft);
+  animation: breathe 2.6s var(--ease) infinite;
+  flex-shrink: 0;
+}
+.auto-pill.off .auto-dot {
+  background: var(--text-lo);
+  box-shadow: none;
+  animation: none;
+}
+.auto-pill.off {
+  color: var(--text-lo);
+}
+.auto-pill.warn .auto-dot {
+  background: var(--amber);
+  box-shadow: 0 0 0 3px var(--amber-soft);
+  animation: none;
+}
+.auto-time {
+  color: var(--text-lo);
+  font-variant-numeric: tabular-nums;
+}
+/* 用小圆点把「周期」和「上次同步时刻」分开，挤在一起像一串数字 */
+.auto-time::before {
+  content: '·';
+  margin-right: 5px;
+  color: var(--line-3);
+}
+
+/* 状态刚变的行闪一下：底色 + 左侧信号色竖条，只染背景不动文字，
+   避免整表在眼前跳；2.6s 后自己褪掉 */
+.order-table :deep(.row-flash > td.el-table__cell) {
+  animation: row-flash 2.4s var(--ease);
+}
+.order-table :deep(.row-flash > td.el-table__cell:first-child) {
+  box-shadow: inset 2px 0 0 var(--signal);
+}
+@keyframes row-flash {
+  0%,
+  45% {
+    background-color: var(--signal-flash);
+  }
+  100% {
+    background-color: transparent;
+  }
 }
 
 .order-table :deep(.num-cell .cell) {
@@ -448,5 +651,15 @@ onMounted(async () => {
   border-radius: var(--r-1);
   flex-shrink: 0;
   border: 1px solid var(--line-1);
+}
+
+/* 动效敏感的人：呼吸灯和高亮直接关掉，状态本身仍然在更新 */
+@media (prefers-reduced-motion: reduce) {
+  .auto-dot {
+    animation: none;
+  }
+  .order-table :deep(.row-flash > td.el-table__cell) {
+    animation: none;
+  }
 }
 </style>

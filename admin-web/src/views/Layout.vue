@@ -120,6 +120,27 @@
 
           <span class="clock mono">{{ clock }}</span>
 
+          <!-- 主题切换：浅色「雾白」/ 深色「石墨」，偏好记在本地 -->
+          <button
+            class="icon-btn"
+            type="button"
+            :title="theme.mode === 'dark' ? '切到浅色（雾白）' : '切到深色（石墨）'"
+            @click="theme.toggle()"
+          >
+            <svg v-if="theme.mode === 'dark'" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+              <path
+                d="M8 2.2a5.8 5.8 0 1 0 5.6 7.4A4.6 4.6 0 0 1 8 2.2Z"
+                fill="currentColor"
+              />
+            </svg>
+            <svg v-else viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+              <circle cx="8" cy="8" r="3.1" fill="currentColor" />
+              <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
+                <path d="M8 1v1.4M8 13.6V15M1 8h1.4M13.6 8H15M3 3l1 1M12 12l1 1M13 3l-1 1M4 12l-1 1" />
+              </g>
+            </svg>
+          </button>
+
           <span class="divider" />
 
           <el-dropdown @command="onCommand">
@@ -151,12 +172,14 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '@/stores/auth';
 import { useAlertStore } from '@/stores/alerts';
+import { useThemeStore } from '@/stores/theme';
 import AlertCenter from '@/components/AlertCenter.vue';
 
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const store = useAlertStore();
+const theme = useThemeStore();
 
 interface NavItem {
   idx: string;
@@ -197,6 +220,11 @@ const NAV: NavGroup[] = [
     code: '03 / crm',
     title: '客户',
     items: [{ idx: '08', path: '/users', label: '用户管理' }],
+  },
+  {
+    code: '04 / system',
+    title: '设置',
+    items: [{ idx: '09', path: '/settings', label: '配置管理' }],
   },
 ];
 
@@ -305,7 +333,7 @@ onBeforeUnmount(() => {
   flex: none;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(46, 230, 197, 0.45);
+  border: 1px solid var(--signal-border);
   color: var(--signal);
   font-size: 13px;
   font-weight: 600;
@@ -368,11 +396,11 @@ onBeforeUnmount(() => {
 }
 .nav-item:hover {
   color: var(--text-hi);
-  background: rgba(233, 241, 245, 0.03);
+  background: var(--hover);
 }
 .nav-item.active {
   color: var(--text-hi);
-  background: linear-gradient(90deg, rgba(46, 230, 197, 0.1), transparent 78%);
+  background: linear-gradient(90deg, var(--signal-soft), transparent 78%);
 }
 .nav-item.active::before {
   background: var(--signal);
@@ -402,12 +430,12 @@ onBeforeUnmount(() => {
 .nav-badge.signal {
   color: var(--signal);
   background: var(--signal-soft);
-  border: 1px solid rgba(46, 230, 197, 0.28);
+  border: 1px solid var(--signal-border);
 }
 .nav-badge.amber {
   color: var(--amber);
   background: var(--amber-soft);
-  border: 1px solid rgba(245, 181, 68, 0.28);
+  border: 1px solid var(--amber-border);
 }
 
 .rail-foot {
@@ -496,7 +524,7 @@ onBeforeUnmount(() => {
   height: 26px;
   padding: 0 10px;
   background: transparent;
-  border: 1px solid rgba(46, 230, 197, 0.34);
+  border: 1px solid var(--signal-border);
   border-radius: var(--r-pill);
   color: var(--signal);
   font-size: 11px;
@@ -506,7 +534,7 @@ onBeforeUnmount(() => {
 }
 .unlock-chip:hover {
   background: var(--signal-soft);
-  border-color: rgba(46, 230, 197, 0.6);
+  border-color: var(--signal);
 }
 .badge {
   position: absolute;
@@ -519,7 +547,7 @@ onBeforeUnmount(() => {
   place-items: center;
   border-radius: var(--r-pill);
   background: var(--red);
-  color: #1a0503;
+  color: var(--red-ink);
   font-size: 9px;
   font-weight: 700;
   line-height: 1;

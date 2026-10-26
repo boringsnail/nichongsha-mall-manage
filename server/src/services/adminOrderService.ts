@@ -3,20 +3,43 @@ import { notFound, orderIllegal } from '../utils/HttpError.js';
 import { syncFulfillmentQuietly } from './orderService.js';
 import { getWechatOrderState, LOGISTICS_TYPE, LOGISTICS_TYPE_LABEL } from './shippingService.js';
 
-export async function listAdminOrders(query: { status?: string; page?: number; size?: number }) {
+export async function listAdminOrders(query: {
+  status?: string;
+  page?: number;
+  size?: number;
+  /** 列表页 5 秒轮询时带上：顺手把还能变化的订单和微信对一次账 */
+  autoSync?: boolean;
+}) {
   const page = Math.max(1, query.page ?? 1);
   const size = Math.min(50, Math.max(1, query.size ?? 10));
   const where = { ...(query.status ? { status: query.status as never } : {}) };
-  const [total, rows] = await Promise.all([
-    prisma.order.count({ where }),
+  const fetchPage = () =>
     prisma.order.findMany({
       where,
       include: { user: true, items: true },
       orderBy: { createdAt: 'desc' },
       skip: (page - 1) * size,
       take: size,
-    }),
-  ]);
+    });
+
+  let [total, rows] = await Promise.all([prisma.order.count({ where }), fetchPage()]);
+
+  // 自动同步：只碰当前页里「还能变」的单（待发货 / 已发货）。
+  // 单笔 30 秒节流由 syncFulfillmentQuietly 内部兜住，所以前端 5 秒一刷也不会把微信接口打爆：
+  // 10 笔订单最坏情况是每 30 秒 10 次 get_order，约 0.33 QPS。
+  let synced = 0;
+  if (query.autoSync) {
+    const active = rows.filter((o) => o.status === 'PAID' || o.status === 'SHIPPED').map((o) => o.orderNo);
+    if (active.length) {
+      const results = await Promise.all(active.map((orderNo) => syncFulfillmentQuietly(orderNo).catch(() => false)));
+      synced = results.filter(Boolean).length;
+      if (synced > 0) {
+        // 状态变化可能让订单离开当前筛选（例如「待发货」里刚发货的），total 也要重算
+        [total, rows] = await Promise.all([prisma.order.count({ where }), fetchPage()]);
+      }
+    }
+  }
+
   return {
     list: rows.map((o) => ({
       orderNo: o.orderNo,
@@ -34,6 +57,8 @@ export async function listAdminOrders(query: { status?: string; page?: number; s
     total,
     page,
     size,
+    synced,
+    serverTime: new Date().toISOString(),
   };
 }
 

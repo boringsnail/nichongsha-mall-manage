@@ -12,6 +12,11 @@ const listQuerySchema = validate({
     status: z.enum(['PENDING_PAYMENT', 'PAID', 'SHIPPED', 'COMPLETED', 'CANCELLED']).optional(),
     page: z.coerce.number().int().positive().optional(),
     size: z.coerce.number().int().positive().optional(),
+    // 列表页 5 秒轮询时传 autoSync=1：服务端顺手和微信对一次账（单笔 30 秒节流）
+    autoSync: z
+      .union([z.literal('1'), z.literal('0'), z.literal('true'), z.literal('false')])
+      .transform((v) => v === '1' || v === 'true')
+      .optional(),
   }),
 });
 

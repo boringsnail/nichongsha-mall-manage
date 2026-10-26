@@ -111,7 +111,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import * as echarts from 'echarts/core';
 import { BarChart, FunnelChart, LineChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
@@ -133,6 +133,9 @@ import {
   type TrendPoint,
 } from '@/api/stats';
 import { fenToYuan } from '@/utils/money';
+import { useThemeStore } from '@/stores/theme';
+
+const theme = useThemeStore();
 
 // 按需注册，避免整包打入（Dashboard chunk 可减小数百 KB）
 echarts.use([
@@ -145,30 +148,72 @@ echarts.use([
   CanvasRenderer,
 ]);
 
-// ---- 图表色板：与设计令牌保持一致，canvas 里必须显式给色 ----
-const SIGNAL = '#2ee6c5';
-const AMBER = '#f5b544';
-const AXIS = '#27353d';
-const AXIS_LABEL = '#61747f';
-const TEXT_MID = '#9cb0bb';
+// ---- 图表色板：canvas 里拿不到 CSS 变量，只能在渲染时读一次令牌再显式给色 ----
+// 这样浅色（雾白）/ 深色（石墨）两套主题下，坐标轴、网格、tooltip 都会跟着变。
 const MONO = 'JetBrains Mono Variable, monospace';
-// 漏斗用信号色的明度阶梯，比彩虹色更像仪表
-const FUNNEL_RAMP = ['#2ee6c5', '#28c4a9', '#22a48d', '#1c8471', '#176556'];
 
-const tooltipStyle = {
-  backgroundColor: '#162127',
-  borderColor: '#27353d',
-  borderWidth: 1,
-  padding: [8, 10] as [number, number],
-  textStyle: { color: '#e9f1f5', fontSize: 11, fontFamily: MONO },
-  extraCssText: 'box-shadow: 0 12px 32px rgba(0,0,0,.55); border-radius: 2px;',
-};
+function cssVar(name: string, fallback: string): string {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
 
-const axisCommon = {
-  axisLine: { lineStyle: { color: AXIS } },
-  axisTick: { show: false },
-  axisLabel: { color: AXIS_LABEL, fontSize: 10, fontFamily: MONO },
-};
+type Palette = ReturnType<typeof readPalette>;
+
+function readPalette() {
+  return {
+    signal: cssVar('--signal', '#0a7566'),
+    amber: cssVar('--amber', '#8f5c09'),
+    axis: cssVar('--line-2', '#d3d9e2'),
+    axisLabel: cssVar('--text-lo', '#8a94a3'),
+    textMid: cssVar('--text-mid', '#4a5563'),
+    gridLine: cssVar('--line-1', '#e4e8ee'),
+    panel: cssVar('--ink-850', '#ffffff'),
+    overlay: cssVar('--ink-820', '#ffffff'),
+    textHi: cssVar('--text-hi', '#101419'),
+    shadow: cssVar('--shadow-2', '0 14px 36px rgba(0,0,0,.16)'),
+  };
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const n = parseInt(full.slice(0, 6), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** 把 a 往 b 掺 t（0=全 a，1=全 b），用来生成漏斗的明度阶梯 */
+function mix(a: string, b: string, t: number): string {
+  const [r1, g1, b1] = hexToRgb(a);
+  const [r2, g2, b2] = hexToRgb(b);
+  const c = (x: number, y: number) => Math.round(x + (y - x) * t);
+  return `rgb(${c(r1, r2)}, ${c(g1, g2)}, ${c(b1, b2)})`;
+}
+
+/** 深底配浅字、浅底配深字：漏斗每级底色不同，字色必须逐级算 */
+function inkOn(bg: string): string {
+  const [r, g, b] = hexToRgb(bg);
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return lum < 0.55 ? '#ffffff' : '#0b1418';
+}
+
+function tooltipStyle(p: Palette) {
+  return {
+    backgroundColor: p.overlay,
+    borderColor: p.axis,
+    borderWidth: 1,
+    padding: [8, 10] as [number, number],
+    textStyle: { color: p.textHi, fontSize: 11, fontFamily: MONO },
+    extraCssText: `box-shadow: ${p.shadow}; border-radius: 2px;`,
+  };
+}
+
+function axisCommon(p: Palette) {
+  return {
+    axisLine: { lineStyle: { color: p.axis } },
+    axisTick: { show: false },
+    axisLabel: { color: p.axisLabel, fontSize: 10, fontFamily: MONO },
+  };
+}
 
 const loading = ref(false);
 const days = ref(30);
@@ -210,9 +255,11 @@ let topChart: ECharts | null = null;
 function renderTrend(points: TrendPoint[]) {
   if (!trendRef.value) return;
   if (!trendChart) trendChart = echarts.init(trendRef.value);
+  const p = readPalette();
+  const axis = axisCommon(p);
   trendChart.setOption(
     {
-      tooltip: { trigger: 'axis', ...tooltipStyle, axisPointer: { lineStyle: { color: AXIS } } },
+      tooltip: { trigger: 'axis', ...tooltipStyle(p), axisPointer: { lineStyle: { color: p.axis } } },
       legend: {
         data: ['GMV', '订单数'],
         right: 0,
@@ -220,32 +267,32 @@ function renderTrend(points: TrendPoint[]) {
         itemWidth: 10,
         itemHeight: 2,
         itemGap: 16,
-        textStyle: { color: TEXT_MID, fontSize: 10, fontFamily: MONO },
+        textStyle: { color: p.textMid, fontSize: 10, fontFamily: MONO },
       },
       grid: { left: 52, right: 52, top: 44, bottom: 28 },
       xAxis: {
         type: 'category',
-        data: points.map((p) => p.date.slice(5)),
-        ...axisCommon,
-        axisLabel: { ...axisCommon.axisLabel, interval: points.length > 20 ? 'auto' : 0 },
+        data: points.map((pt) => pt.date.slice(5)),
+        ...axis,
+        axisLabel: { ...axis.axisLabel, interval: points.length > 20 ? 'auto' : 0 },
       },
       yAxis: [
         {
           type: 'value',
           name: 'GMV',
-          nameTextStyle: { color: AXIS_LABEL, fontSize: 10, fontFamily: MONO, align: 'right' },
-          ...axisCommon,
-          splitLine: { lineStyle: { color: 'rgba(39,53,61,0.55)', type: 'dashed' } },
+          nameTextStyle: { color: p.axisLabel, fontSize: 10, fontFamily: MONO, align: 'right' },
+          ...axis,
+          splitLine: { lineStyle: { color: p.gridLine, type: 'dashed' } },
           axisLabel: {
-            ...axisCommon.axisLabel,
+            ...axis.axisLabel,
             formatter: (v: number) => (v >= 10000 ? `${v / 10000}w` : `${v}`),
           },
         },
         {
           type: 'value',
           name: '订单',
-          nameTextStyle: { color: AXIS_LABEL, fontSize: 10, fontFamily: MONO },
-          ...axisCommon,
+          nameTextStyle: { color: p.axisLabel, fontSize: 10, fontFamily: MONO },
+          ...axis,
           minInterval: 1,
           splitLine: { show: false },
         },
@@ -258,13 +305,13 @@ function renderTrend(points: TrendPoint[]) {
           symbol: 'circle',
           symbolSize: 4,
           showSymbol: points.length <= 14,
-          data: points.map((p) => Number((p.gmv / 100).toFixed(2))),
-          lineStyle: { width: 2, color: SIGNAL },
-          itemStyle: { color: SIGNAL },
+          data: points.map((pt) => Number((pt.gmv / 100).toFixed(2))),
+          lineStyle: { width: 2, color: p.signal },
+          itemStyle: { color: p.signal },
           areaStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: 'rgba(46,230,197,0.22)' },
-              { offset: 1, color: 'rgba(46,230,197,0)' },
+              { offset: 0, color: mix(p.signal, p.panel, 0.78) },
+              { offset: 1, color: mix(p.signal, p.panel, 1) },
             ]),
           },
         },
@@ -272,10 +319,11 @@ function renderTrend(points: TrendPoint[]) {
           name: '订单数',
           type: 'bar',
           yAxisIndex: 1,
-          data: points.map((p) => p.orderCount),
+          data: points.map((pt) => pt.orderCount),
           barMaxWidth: 10,
-          // 次要序列用低饱和琥珀，避免抢走 GMV 主线的视觉重量
-          itemStyle: { color: 'rgba(245,181,68,0.34)' },
+          // 次要序列用低饱和琥珀，避免抢走 GMV 主线的视觉重量；
+          // 掺白/掺面板只到 28%，再淡就低于 3:1 看不清了
+          itemStyle: { color: mix(p.amber, p.panel, 0.28) },
         },
       ],
     },
@@ -286,16 +334,20 @@ function renderTrend(points: TrendPoint[]) {
 function renderFunnel(data: FunnelData | null) {
   if (!funnelRef.value) return;
   if (!funnelChart) funnelChart = echarts.init(funnelRef.value);
+  const p = readPalette();
   const stages = data?.stages ?? [];
   // 全 0 时漏斗会渲染成空白，给递减占位值保留图形轮廓（仅展示用）
   const hasData = stages.some((s) => s.value > 0);
+  // 漏斗用信号色的明度阶梯（向面板色掺），比彩虹色更像仪表；
+  // 字色逐级算，保证浅色主题下深色块配白字、浅色块配深字。
+  const ramp = [0, 0.18, 0.36, 0.54, 0.72].map((t) => mix(p.signal, p.panel, t));
   funnelChart.setOption(
     {
       tooltip: {
         trigger: 'item',
-        ...tooltipStyle,
-        formatter: (p: unknown) => {
-          const item = p as { dataIndex: number };
+        ...tooltipStyle(p),
+        formatter: (pt: unknown) => {
+          const item = pt as { dataIndex: number };
           const s = stages[item.dataIndex];
           if (!s) return '';
           return `${s.label}<br/>会话 ${s.value}<br/>较首级 ${s.rate}%`;
@@ -315,18 +367,22 @@ function renderFunnel(data: FunnelData | null) {
           label: {
             show: true,
             position: 'inside',
-            color: '#04201b',
+            color: inkOn(ramp[0]),
             fontSize: 11,
             fontFamily: MONO,
             fontWeight: 600,
           },
           labelLine: { show: false },
-          itemStyle: { borderColor: '#111a1e', borderWidth: 1 },
-          data: stages.map((s, i) => ({
-            name: `${s.label} ${s.rate}%`,
-            value: hasData ? s.value : Math.max(stages.length - i, 1),
-            itemStyle: { color: FUNNEL_RAMP[i % FUNNEL_RAMP.length] },
-          })),
+          itemStyle: { borderColor: p.panel, borderWidth: 1 },
+          data: stages.map((s, i) => {
+            const bg = ramp[i % ramp.length];
+            return {
+              name: `${s.label} ${s.rate}%`,
+              value: hasData ? s.value : Math.max(stages.length - i, 1),
+              itemStyle: { color: bg },
+              label: { color: inkOn(bg) },
+            };
+          }),
         },
       ],
     },
@@ -337,40 +393,42 @@ function renderFunnel(data: FunnelData | null) {
 function renderTop(products: TopProduct[]) {
   if (!topRef.value) return;
   if (!topChart) topChart = echarts.init(topRef.value);
+  const p = readPalette();
+  const axis = axisCommon(p);
   topChart.setOption(
     {
       tooltip: {
         trigger: 'axis',
-        ...tooltipStyle,
+        ...tooltipStyle(p),
         formatter: (params: unknown) => {
           const items = params as { name: string; value: number; marker: string }[];
           if (!items.length) return '';
-          const p = products.find((x) => x.name === items[0].name);
+          const pt = products.find((x) => x.name === items[0].name);
           return items
             .map((i) => `${i.marker}${i.name}：${i.value} 件`)
-            .concat(p ? [`GMV：${fenToYuan(p.gmv)} 元`] : [])
+            .concat(pt ? [`GMV：${fenToYuan(pt.gmv)} 元`] : [])
             .join('<br/>');
         },
       },
       grid: { left: 44, right: 16, top: 18, bottom: 52 },
       xAxis: {
         type: 'category',
-        data: products.map((p) => p.name),
-        ...axisCommon,
-        axisLabel: { ...axisCommon.axisLabel, interval: 0, rotate: 24, width: 84, overflow: 'truncate' },
+        data: products.map((pt) => pt.name),
+        ...axis,
+        axisLabel: { ...axis.axisLabel, interval: 0, rotate: 24, width: 84, overflow: 'truncate' },
       },
       yAxis: {
         type: 'value',
-        ...axisCommon,
+        ...axis,
         minInterval: 1,
-        splitLine: { lineStyle: { color: 'rgba(39,53,61,0.55)', type: 'dashed' } },
+        splitLine: { lineStyle: { color: p.gridLine, type: 'dashed' } },
       },
       series: [
         {
           type: 'bar',
-          data: products.map((p) => p.salesCount),
+          data: products.map((pt) => pt.salesCount),
           barMaxWidth: 26,
-          itemStyle: { color: SIGNAL, opacity: 0.85 },
+          itemStyle: { color: p.signal, opacity: 0.85 },
         },
       ],
     },
@@ -418,6 +476,18 @@ onMounted(() => {
   window.addEventListener('resize', handleResize);
   load();
 });
+
+// 切主题时 canvas 不会自动重画，得用当前数据按新色板重渲染一遍
+watch(
+  () => theme.mode,
+  () => {
+    nextTick(() => {
+      renderTrend(trend.value);
+      renderFunnel(funnel.value);
+      renderTop(topProducts.value);
+    });
+  }
+);
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize);
@@ -518,7 +588,7 @@ onBeforeUnmount(() => {
 .worst {
   margin-top: 8px;
   padding: 7px 10px;
-  border: 1px solid rgba(245, 181, 68, 0.28);
+  border: 1px solid var(--amber-border);
   background: var(--amber-soft);
   color: var(--amber);
   font-size: 11px;
@@ -569,15 +639,15 @@ onBeforeUnmount(() => {
 }
 .advice.info .advice-tag {
   color: var(--blue);
-  border-color: rgba(106, 168, 255, 0.32);
+  border-color: var(--blue-border);
 }
 .advice.warn .advice-tag {
   color: var(--amber);
-  border-color: rgba(245, 181, 68, 0.32);
+  border-color: var(--amber-border);
 }
 .advice.danger .advice-tag {
   color: var(--red);
-  border-color: rgba(255, 95, 87, 0.32);
+  border-color: var(--red-border);
 }
 .advice-title {
   font-size: 12.5px;

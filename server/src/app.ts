@@ -15,6 +15,8 @@ import { adminSkusRouter } from './routes/adminSkus.js';
 import { adminOrdersRouter } from './routes/adminOrders.js';
 import { adminAfterSalesRouter } from './routes/adminAfterSales.js';
 import { adminAlertsRouter } from './routes/adminAlerts.js';
+import { adminConfigRouter } from './routes/adminConfig.js';
+import { announcementRouter } from './routes/announcement.js';
 import { adminUsersRouter } from './routes/adminUsers.js';
 import { afterSalesRouter } from './routes/afterSales.js';
 import { adminStatsRouter } from './routes/adminStats.js';
@@ -87,6 +89,7 @@ export function createApp() {
   app.use('/api/after-sales', requireAuth('user'), afterSalesRouter);
   app.use('/api/categories', categoriesRouter);
   app.use('/api/products', productsRouter);
+  app.use('/api/announcement', announcementRouter);
   app.use('/api/admin/auth', adminAuthRouter);
   app.use('/api/admin/categories', requireAuth('merchant'), adminCategoriesRouter);
   app.use('/api/admin/products', requireAuth('merchant'), adminProductsRouter);
@@ -94,6 +97,7 @@ export function createApp() {
   app.use('/api/admin/orders', requireAuth('merchant'), adminOrdersRouter);
   app.use('/api/admin/after-sales', requireAuth('merchant'), adminAfterSalesRouter);
   app.use('/api/admin/alerts', requireAuth('merchant'), adminAlertsRouter);
+  app.use('/api/admin/config', requireAuth('merchant'), adminConfigRouter);
   app.use('/api/admin/users', requireAuth('merchant'), adminUsersRouter);
   app.use('/api/admin/stats', requireAuth('merchant'), adminStatsRouter);
 

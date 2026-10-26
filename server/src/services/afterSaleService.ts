@@ -2,6 +2,7 @@ import { prisma } from '../db.js';
 import { badRequest, notFound, orderIllegal } from '../utils/HttpError.js';
 import { secureRandomFour } from '../auth/jwt.js';
 import { executeRefund, markRefunded, markRefundRetryable, markRefundManual } from './refundService.js';
+import { CONFIG_KEYS, configBool, configInt, peekConfig } from './configService.js';
 
 // 售后体系（对齐淘宝）：
 //
@@ -594,7 +595,15 @@ export async function hasActiveAfterSale(orderId: number): Promise<boolean> {
 // （会真的触发退款，务必确认这是你要的）。
 
 /** 商家处理售后的提醒时限（小时），默认 48。环境变量 AFTER_SALE_REVIEW_HOURS */
+/**
+ * 「超时」判定时长（小时），默认 48。
+ *
+ * 优先级：后台配置页（AppConfig）> 环境变量 AFTER_SALE_REVIEW_HOURS > 48。
+ * 商家在配置页改完立刻生效，不用重启容器；环境变量保留为兜底与本地开发用。
+ */
 export function afterSaleReviewHours(): number {
+  const fromDb = configInt(CONFIG_KEYS.autoApproveHours, 0);
+  if (fromDb > 0) return fromDb;
   const n = Number(process.env.AFTER_SALE_REVIEW_HOURS ?? 48);
   return Number.isFinite(n) && n > 0 ? n : 48;
 }
@@ -607,8 +616,17 @@ export function afterSaleReturnDays(): number {
   return n;
 }
 
-/** 是否允许「超时未处理自动同意退款」，默认关闭。环境变量 AFTER_SALE_AUTO_APPROVE */
+/**
+ * 是否允许「超时未处理自动同意退款」，默认关闭。
+ *
+ * 优先级：后台配置页 > 环境变量 AFTER_SALE_AUTO_APPROVE。
+ * 配置表里只要有一行记录就以它为准（哪怕是 '0'），这样商家在页面上关掉就是真关掉，
+ * 不会被遗留的环境变量重新打开。
+ */
 export function afterSaleAutoApprove(): boolean {
+  if (peekConfig(CONFIG_KEYS.autoApproveEnabled) !== undefined) {
+    return configBool(CONFIG_KEYS.autoApproveEnabled, false);
+  }
   const v = (process.env.AFTER_SALE_AUTO_APPROVE ?? '').trim().toLowerCase();
   return v === '1' || v === 'true' || v === 'yes' || v === 'on';
 }

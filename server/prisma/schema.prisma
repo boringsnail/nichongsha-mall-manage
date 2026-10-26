@@ -259,3 +259,14 @@ model Merchant {
   nickname     String?
   createdAt    DateTime @default(now())
 }
+
+/// 键值配置表：公告、售后超时规则这类「商家自己会改、但不该进环境变量」的设置。
+/// 刻意用 key-value 而不是宽表：每加一个配置项不用再写迁移，值统一存字符串，
+/// 由 configService 负责类型转换与默认值兜底。
+model AppConfig {
+  key       String   @id @db.VarChar(64)
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+
+  @@map("AppConfig")
+}

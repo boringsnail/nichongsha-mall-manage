@@ -36,8 +36,20 @@ export interface Page<T> {
   size: number;
 }
 
-export function adminListOrders(params: { status?: OrderStatus; page?: number; size?: number }): Promise<Page<AdminOrderRow>> {
-  return api.get<Page<AdminOrderRow>>('/admin/orders', { params });
+/** 订单列表的附加信息：自动同步本轮更新了几笔、服务端时间 */
+export interface OrderListPage extends Page<AdminOrderRow> {
+  synced?: number;
+  serverTime?: string;
+}
+
+export function adminListOrders(params: {
+  status?: OrderStatus;
+  page?: number;
+  size?: number;
+  /** 传 1 让服务端顺手和微信对一次账（单笔 30 秒节流，前端可以放心 5 秒一刷） */
+  autoSync?: 1;
+}): Promise<OrderListPage> {
+  return api.get<OrderListPage>('/admin/orders', { params });
 }
 
 export function adminGetOrder(orderNo: string): Promise<AdminOrderDetail> {

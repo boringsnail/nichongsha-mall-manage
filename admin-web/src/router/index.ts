@@ -20,6 +20,7 @@ const router = createRouter({
         { path: 'after-sales', name: 'after-sales', component: () => import('@/views/afterSales/AfterSaleList.vue'), meta: { title: '售后管理' } },
         { path: 'stock', name: 'stock', component: () => import('@/views/Stock.vue'), meta: { title: '库存管理' } },
         { path: 'users', name: 'users', component: () => import('@/views/users/UserList.vue'), meta: { title: '用户管理' } },
+        { path: 'settings', name: 'settings', component: () => import('@/views/Settings.vue'), meta: { title: '配置管理' } },
       ],
     },
   ],
