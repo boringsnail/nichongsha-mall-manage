@@ -6,6 +6,15 @@ import { prisma } from './db.js';
 
 const ORDER_NO = 'NPA' + '6'.repeat(16);
 
+// 微信侧响应在服务里用 res.text() 再 JSON.parse（非 JSON 也要能兜住），
+// 所以 mock 必须同时提供 text()，只给 json() 会直接抛 "res.text is not a function"。
+const fakeRes = (body: unknown) => ({
+  ok: true,
+  status: 200,
+  json: async () => body,
+  text: async () => JSON.stringify(body),
+});
+
 function stubWxEnv() {
   vi.stubEnv('WX_APPID', 'wxce86198b133baa5e');
   vi.stubEnv('WX_APPSECRET', '6514918f4240695d870a1cc1058c3abd');
@@ -82,10 +91,10 @@ describe('发货信息上报', () => {
     const calls: { url: string; body: string }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { body?: string }) => {
       calls.push({ url: String(url), body: init?.body ?? '' });
-      if (String(url).includes('/cgi-bin/token')) {
-        return { json: async () => ({ access_token: 'TOKEN-1', expires_in: 7200 }) };
+      if (String(url).includes('/cgi-bin/stable_token')) {
+        return fakeRes({ access_token: 'TOKEN-1', expires_in: 7200 });
       }
-      return { json: async () => ({ errcode: 0, errmsg: 'ok' }) };
+      return fakeRes({ errcode: 0, errmsg: 'ok' });
     }));
     vi.resetModules();
     stubWxEnv();
@@ -95,7 +104,7 @@ describe('发货信息上报', () => {
 
     expect(result.ok).toBe(true);
     expect(calls).toHaveLength(2);
-    expect(calls[0].url).toContain('/cgi-bin/token');
+    expect(calls[0].url).toContain('/cgi-bin/stable_token');
     expect(calls[1].url).toContain('/wxa/sec/order/upload_shipping_info');
     const payload = JSON.parse(calls[1].body);
     expect(payload.order_key).toEqual({ order_number_type: 2, transaction_id: '4200001234202610160000000009' });
@@ -111,10 +120,10 @@ describe('发货信息上报', () => {
     const calls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       calls.push(String(url));
-      if (String(url).includes('/cgi-bin/token')) {
-        return { json: async () => ({ access_token: 'TOKEN-CACHE', expires_in: 7200 }) };
+      if (String(url).includes('/cgi-bin/stable_token')) {
+        return fakeRes({ access_token: 'TOKEN-CACHE', expires_in: 7200 });
       }
-      return { json: async () => ({ errcode: 0, errmsg: 'ok' }) };
+      return fakeRes({ errcode: 0, errmsg: 'ok' });
     }));
     vi.resetModules();
     stubWxEnv();
@@ -123,7 +132,7 @@ describe('发货信息上报', () => {
     await uploadShippingInfo(ORDER_NO);
     await uploadShippingInfo(ORDER_NO);
 
-    expect(calls.filter((u) => u.includes('/cgi-bin/token'))).toHaveLength(1);
+    expect(calls.filter((u) => u.includes('/cgi-bin/stable_token'))).toHaveLength(1);
   });
 
   it('订单缺物流单号 → 跳过上报（不调用微信）', async () => {
@@ -131,7 +140,7 @@ describe('发货信息上报', () => {
     const calls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       calls.push(String(url));
-      return { json: async () => ({ errcode: 0 }) };
+      return fakeRes({ errcode: 0 });
     }));
     vi.resetModules();
     stubWxEnv();
@@ -146,10 +155,10 @@ describe('发货信息上报', () => {
   it('微信返回非 0 → 透出错误但不抛异常（发货本身不受影响）', async () => {
     await seedShippedOrder({ withTracking: true });
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (String(url).includes('/cgi-bin/token')) {
-        return { json: async () => ({ access_token: 'T', expires_in: 7200 }) };
+      if (String(url).includes('/cgi-bin/stable_token')) {
+        return fakeRes({ access_token: 'T', expires_in: 7200 });
       }
-      return { json: async () => ({ errcode: 9300502, errmsg: '物流公司编码有误' }) };
+      return fakeRes({ errcode: 9300502, errmsg: '物流公司编码有误' });
     }));
     vi.resetModules();
     stubWxEnv();

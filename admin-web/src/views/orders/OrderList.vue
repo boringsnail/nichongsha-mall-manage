@@ -1,15 +1,20 @@
 <template>
   <div>
-    <div class="toolbar">
-      <el-select v-model="status" placeholder="全部状态" clearable style="width: 160px" @change="load">
-        <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
-      </el-select>
-      <el-button type="primary" @click="load">查询</el-button>
-      <el-button :loading="syncing" @click="syncAll">同步微信状态</el-button>
-      <span class="muted sync-tip">商家在微信后台「订单发货管理」里发货不会回调本系统，点此拉取最新状态</span>
+    <div class="cmdbar">
+      <div class="cmd-left">
+        <span class="label">filter</span>
+        <el-select v-model="status" placeholder="全部状态" clearable style="width: 150px" @change="load">
+          <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
+        </el-select>
+        <el-button type="primary" @click="load">查询</el-button>
+      </div>
+      <div class="cmd-right">
+        <span class="mono sync-tip">微信后台录的发货不会回调本系统，需手动拉取</span>
+        <el-button :loading="syncing" @click="syncAll">同步微信状态</el-button>
+      </div>
     </div>
 
-    <el-table v-loading="loading" :data="rows" border stripe>
+    <el-table v-loading="loading" :data="rows" class="order-table">
       <el-table-column prop="orderNo" label="订单号" width="190" />
       <el-table-column label="用户" width="150">
         <template #default="{ row }">
@@ -17,21 +22,21 @@
           <div class="muted">{{ row.user.openid }}</div>
         </template>
       </el-table-column>
-      <el-table-column label="金额（元）" width="110">
+      <el-table-column label="金额（元）" width="110" align="right" header-align="right" class-name="num-cell">
         <template #default="{ row }">{{ fenToYuan(row.totalAmount) }}</template>
       </el-table-column>
-      <el-table-column prop="itemCount" label="商品数" width="80" />
-      <el-table-column label="状态" width="150">
+      <el-table-column prop="itemCount" label="件数" width="72" align="right" header-align="right" class-name="num-cell" />
+      <el-table-column label="状态" width="160">
         <template #default="{ row }">
           <el-tag :type="statusTag(row.status)">{{ statusText(row.status) }}</el-tag>
           <div v-if="row.afterSaleStatus" class="as-tag">
-            <el-tag size="small" :type="afterSaleTag(row.afterSaleStatus)" effect="plain">
+            <el-tag size="small" :type="afterSaleTag(row.afterSaleStatus)">
               {{ afterSaleText(row.afterSaleStatus) }}
             </el-tag>
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="下单时间" width="170">
+      <el-table-column label="下单时间" width="170" class-name="num-cell">
         <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="200" fixed="right">
@@ -159,7 +164,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import {
   adminListOrders,
@@ -242,6 +247,7 @@ const afterSaleTag = (s: string): TagType => AFTER_SALE_TAG[s] ?? 'info';
 const formatTime = (t: string) => new Date(t).toLocaleString('zh-CN', { hour12: false });
 
 const router = useRouter();
+const route = useRoute();
 
 /** 跳到售后管理页并按订单号过滤，省得商家再手输一遍 */
 function openAfterSale(orderNo: string) {
@@ -367,31 +373,53 @@ async function submitShip() {
   }
 }
 
-onMounted(load);
+// 告警卡片的「去处理」会带 ?orderNo=xxx 跳进来，直接打开详情，省一次手动搜索
+onMounted(async () => {
+  await load();
+  const target = typeof route.query.orderNo === 'string' ? route.query.orderNo : '';
+  if (target) openDetail(target);
+});
 </script>
 
 <style scoped>
-.toolbar {
+.cmdbar {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
+.cmd-left,
+.cmd-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sync-tip {
+  font-size: 10.5px;
+  color: var(--text-lo);
+  letter-spacing: 0.04em;
+}
+
+.order-table :deep(.num-cell .cell) {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 .pager {
-  margin-top: 16px;
+  margin-top: 14px;
   justify-content: flex-end;
 }
 .muted {
-  color: #999;
-  font-size: 12px;
-}
-.sync-tip {
-  align-self: center;
+  color: var(--text-lo);
+  font-size: 11.5px;
 }
 .ship-tip {
   margin-bottom: 8px;
 }
 .logi-text {
   margin-left: 8px;
+  font-family: var(--font-mono);
 }
 .as-tag {
   margin-top: 4px;
@@ -405,9 +433,10 @@ onMounted(load);
   gap: 10px;
 }
 .cover {
-  width: 40px;
-  height: 40px;
-  border-radius: 4px;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--r-1);
   flex-shrink: 0;
+  border: 1px solid var(--line-1);
 }
 </style>

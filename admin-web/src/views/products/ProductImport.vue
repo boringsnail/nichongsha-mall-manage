@@ -305,7 +305,7 @@ onMounted(async () => {
   margin-bottom: 6px;
 }
 .intro-desc {
-  color: #666;
+  color: var(--text-mid);
   font-size: 13px;
   line-height: 1.7;
 }
@@ -317,7 +317,7 @@ onMounted(async () => {
 }
 .drop {
   padding: 18px 0;
-  color: #666;
+  color: var(--text-mid);
 }
 .drop-icon {
   font-size: 28px;
@@ -336,7 +336,7 @@ onMounted(async () => {
   margin-bottom: 14px;
 }
 .opt-label {
-  color: #666;
+  color: var(--text-mid);
   font-size: 13px;
 }
 .msg {
@@ -354,23 +354,23 @@ onMounted(async () => {
   margin-bottom: 8px;
 }
 .err {
-  color: #d93026;
+  color: var(--red);
   font-size: 12px;
   line-height: 1.6;
 }
 .warn {
-  color: #d98b00;
+  color: var(--amber);
   font-size: 12px;
   line-height: 1.6;
 }
 .ok {
-  color: #bbb;
+  color: var(--text-lo);
 }
 .footer {
   flex-wrap: wrap;
 }
 .hint {
-  color: #888;
+  color: var(--text-lo);
   font-size: 12px;
 }
 code {

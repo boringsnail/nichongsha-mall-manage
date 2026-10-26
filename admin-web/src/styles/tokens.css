@@ -1,0 +1,284 @@
+/* ============================================================================
+   你宠啥 · 商家调度台 —— 设计令牌
+   ----------------------------------------------------------------------------
+   气质：工业控制台。深石板底 + 发丝线 + 等宽数字；颜色只留给「状态」，
+   界面本身近乎无彩。直角、无阴影、无毛玻璃——高级感来自密度、对齐与克制。
+   ========================================================================== */
+
+:root {
+  /* 色板：冷石板灰阶（偏蓝），不是纯黑 */
+  --ink-950: #070a0c;
+  --ink-900: #0a0f12; /* 页面底 */
+  --ink-880: #0d1317; /* 侧栏 */
+  --ink-850: #111a1e; /* 面板 */
+  --ink-820: #162127; /* 浮层 / 悬浮 */
+  --ink-780: #1b272e; /* 输入框 */
+  --ink-740: #22303a; /* 强调底 */
+
+  /* 发丝线三档：分隔、边界、强调边界 */
+  --line-1: #1c272e;
+  --line-2: #27353d;
+  --line-3: #384a54;
+
+  /* 文本三档 */
+  --text-hi: #e9f1f5;
+  --text-mid: #9cb0bb;
+  --text-lo: #61747f;
+
+  /* 信号色：主信号只有一个（工业青绿），其余只用于告警语义 */
+  --signal: #2ee6c5;
+  --signal-ink: #04201b; /* 信号色上的文字 */
+  --signal-soft: rgba(46, 230, 197, 0.12);
+  --amber: #f5b544;
+  --amber-soft: rgba(245, 181, 68, 0.12);
+  --red: #ff5f57;
+  --red-soft: rgba(255, 95, 87, 0.12);
+  --blue: #6aa8ff;
+  --blue-soft: rgba(106, 168, 255, 0.12);
+
+  /* 排版：中文走系统字，数字与标签走等宽（仪表读数感） */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Source Han Sans SC', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* 间距节奏：4 的倍数，但刻意用 4/8/12/20/28/40 拉开层次，不做「万物皆 16」 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 28px;
+  --sp-7: 40px;
+
+  /* 硬边：工业感来自直角，圆角只留给标签 */
+  --r-1: 2px;
+  --r-pill: 999px;
+
+  --ease: cubic-bezier(0.25, 1, 0.5, 1);
+  --dur-1: 140ms;
+  --dur-2: 220ms;
+
+  --rail-w: 216px;
+  --head-h: 56px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ink-900);
+  color: var(--text-hi);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: var(--signal);
+  color: var(--signal-ink);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+  border: 3px solid var(--ink-900);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--line-3);
+}
+
+/* ---------------------------------------------------------------- 原子类 */
+
+.mono,
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.num {
+  letter-spacing: -0.015em;
+}
+
+/* 小号全大写标签：仪表面板上的刻度文字 */
+.label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-lo);
+}
+
+.muted {
+  color: var(--text-lo);
+  font-size: 12px;
+}
+
+/* 面板：发丝线 + 两个对角定位角，像工程图纸的角标 */
+.panel {
+  position: relative;
+  background: var(--ink-850);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+}
+.panel::before,
+.panel::after {
+  content: '';
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-style: solid;
+  border-color: var(--line-3);
+  pointer-events: none;
+}
+.panel::before {
+  top: -1px;
+  left: -1px;
+  border-width: 1px 0 0 1px;
+}
+.panel::after {
+  right: -1px;
+  bottom: -1px;
+  border-width: 0 1px 1px 0;
+}
+
+.panel-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 42px;
+  padding: 0 var(--sp-4);
+  border-bottom: 1px solid var(--line-1);
+}
+.panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-hi);
+}
+.panel-bd {
+  padding: var(--sp-4);
+}
+
+/* 运行指示点：只有「实时」语义的地方才用，且呼吸极轻 */
+.dot-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-soft);
+  animation: breathe 2.6s var(--ease) infinite;
+}
+.dot-dead {
+  background: var(--red);
+  box-shadow: 0 0 0 3px var(--red-soft);
+  animation: none;
+}
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* 工程网格底：仅用于登录页等大面积空白，透明度压到几乎看不见 */
+.grid-backdrop {
+  background-image: linear-gradient(to right, rgba(233, 241, 245, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(233, 241, 245, 0.03) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+/* 状态胶囊：表格里大量出现，必须一眼可辨又不吵 */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--text-mid);
+  white-space: nowrap;
+}
+.pill::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.85;
+}
+.pill-signal {
+  color: var(--signal);
+  border-color: rgba(46, 230, 197, 0.32);
+  background: var(--signal-soft);
+}
+.pill-amber {
+  color: var(--amber);
+  border-color: rgba(245, 181, 68, 0.32);
+  background: var(--amber-soft);
+}
+.pill-red {
+  color: var(--red);
+  border-color: rgba(255, 95, 87, 0.32);
+  background: var(--red-soft);
+}
+.pill-blue {
+  color: var(--blue);
+  border-color: rgba(106, 168, 255, 0.32);
+  background: var(--blue-soft);
+}
+.pill-mute {
+  color: var(--text-lo);
+}
+
+/* 分节标题：左侧一道信号短杠，比 emoji 与图标都克制 */
+.rule-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-hi);
+}
+.rule-title::before {
+  content: '';
+  width: 12px;
+  height: 1px;
+  background: var(--signal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

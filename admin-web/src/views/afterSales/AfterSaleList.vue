@@ -18,61 +18,64 @@
     </el-alert>
 
     <!-- 状态筛选 + 搜索 -->
-    <div class="toolbar">
-      <el-radio-group v-model="status" :disabled="escalatedOnly" @change="reload">
-        <el-radio-button value="ALL">全部</el-radio-button>
-        <el-radio-button v-for="s in STATUS_LIST" :key="s.value" :value="s.value">
-          {{ s.label }}<span v-if="counts[s.value]" class="count">{{ counts[s.value] }}</span>
-        </el-radio-button>
-      </el-radio-group>
-      <el-tag v-if="escalatedOnly" type="danger" closable @close="clearEscalated">
-        只看已升级
-      </el-tag>
+    <div class="cmdbar">
+      <div class="cmd-left">
+        <el-radio-group v-model="status" :disabled="escalatedOnly" @change="reload">
+          <el-radio-button value="ALL">全部</el-radio-button>
+          <el-radio-button v-for="s in STATUS_LIST" :key="s.value" :value="s.value">
+            {{ s.label }}<span v-if="counts[s.value]" class="count">{{ counts[s.value] }}</span>
+          </el-radio-button>
+        </el-radio-group>
+        <el-tag v-if="escalatedOnly" type="danger" closable @close="clearEscalated">
+          只看已升级
+        </el-tag>
+      </div>
     </div>
-    <div class="toolbar">
-      <el-input
-        v-model="keyword"
-        placeholder="售后单号 / 订单号"
-        style="width: 240px"
-        clearable
-        @keyup.enter="reload"
-        @clear="reload"
-      />
-      <el-button type="primary" @click="reload">查询</el-button>
-      <span class="muted tip">
-        待处理超过 {{ reviewHours }} 小时会标红提醒，但<strong>不会自动同意/退款</strong>，需你确认；
-        <template v-if="returnDays > 0">买家超过 {{ returnDays }} 天未寄回将自动关闭</template>
-        <template v-else>买家未寄回不会自动关闭</template>
+    <div class="cmdbar">
+      <div class="cmd-left">
+        <span class="label">search</span>
+        <el-input
+          v-model="keyword"
+          placeholder="售后单号 / 订单号"
+          style="width: 240px"
+          clearable
+          @keyup.enter="reload"
+          @clear="reload"
+        />
+        <el-button type="primary" @click="reload">查询</el-button>
+        <el-tag v-if="overdueCount > 0" type="danger">
+          {{ overdueCount }} 笔已超时待处理
+        </el-tag>
+        <el-tag v-if="autoApprove" type="danger">
+          已开启超时自动退款（AFTER_SALE_AUTO_APPROVE=1）
+        </el-tag>
+      </div>
+      <span class="mono rule-tip">
+        超时 {{ reviewHours }}h 只标红，不会自动退款；<template v-if="returnDays > 0">买家 {{ returnDays }} 天未寄回自动关闭</template><template v-else>买家未寄回不自动关闭</template>
       </span>
-      <el-tag v-if="overdueCount > 0" type="danger" effect="dark">
-        {{ overdueCount }} 笔已超时待处理
-      </el-tag>
-      <el-tag v-if="autoApprove" type="danger" effect="plain">
-        已开启超时自动退款（AFTER_SALE_AUTO_APPROVE=1）
-      </el-tag>
     </div>
 
-    <el-table v-loading="loading" :data="rows" border stripe>
-      <el-table-column prop="afterSaleNo" label="售后单号" width="180" />
-      <el-table-column prop="orderNo" label="订单号" width="180" />
-      <el-table-column label="用户" width="140">
+    <el-table v-loading="loading" :data="rows" class="as-table">
+      <el-table-column prop="afterSaleNo" label="售后单号" width="170" />
+      <el-table-column prop="orderNo" label="订单号" width="170" />
+      <el-table-column label="用户" width="120">
         <template #default="{ row }">
           <div>{{ row.user?.nickname || '微信用户' }}</div>
           <div class="muted">{{ row.user?.openid }}</div>
         </template>
       </el-table-column>
-      <el-table-column label="类型" width="100">
+      <el-table-column label="类型" width="92">
         <template #default="{ row }">
-          <el-tag :type="row.type === 'REFUND_ONLY' ? 'warning' : 'primary'" effect="plain">
+          <el-tag :type="row.type === 'REFUND_ONLY' ? 'warning' : 'primary'">
             {{ row.type === 'REFUND_ONLY' ? '仅退款' : '退货退款' }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="reasonText" label="原因" width="150" show-overflow-tooltip />
-      <el-table-column label="退款金额" width="110">
+      <el-table-column prop="reasonText" label="原因" min-width="110" show-overflow-tooltip />
+      <el-table-column label="退款金额" width="100" align="right" header-align="right" class-name="num-cell">
         <template #default="{ row }">{{ fenToYuan(row.refundAmount) }} 元</template>
       </el-table-column>
-      <el-table-column label="状态" width="150">
+      <el-table-column label="状态" width="138">
         <template #default="{ row }">
           <el-tag :type="statusTag(row.status)">{{ statusText(row.status) }}</el-tag>
           <div v-if="row.status === 'PENDING' && rowEscalated(row)" class="escalated">
@@ -83,7 +86,7 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="申请时间" width="170">
+      <el-table-column label="申请时间" width="170" class-name="num-cell time-cell">
         <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="190" fixed="right">
@@ -506,41 +509,57 @@ onMounted(() => {
   margin-top: 2px;
   font-size: 12px;
 }
-.toolbar {
+.cmdbar {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
-  align-items: center;
   flex-wrap: wrap;
 }
-.tip {
-  align-self: center;
+.cmd-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.rule-tip {
+  font-size: 10.5px;
+  color: var(--text-lo);
+  letter-spacing: 0.04em;
+}
+.as-table :deep(.time-cell .cell) {
+  white-space: nowrap;
+}
+.as-table :deep(.num-cell .cell) {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 .count {
   margin-left: 4px;
   font-weight: 600;
 }
 .overdue {
-  color: #f56c6c;
-  font-size: 12px;
-  margin-top: 2px;
+  color: var(--red);
+  font-size: 11px;
+  margin-top: 3px;
 }
 .escalated {
-  color: #f56c6c;
-  font-size: 12px;
+  color: var(--red);
+  font-size: 11px;
   font-weight: 600;
-  margin-top: 2px;
+  margin-top: 3px;
 }
 .ml {
   margin-left: 6px;
 }
 .pager {
-  margin-top: 16px;
+  margin-top: 14px;
   justify-content: flex-end;
 }
 .muted {
-  color: #999;
-  font-size: 12px;
+  color: var(--text-lo);
+  font-size: 11.5px;
 }
 .block {
   margin-top: 16px;
@@ -548,6 +567,9 @@ onMounted(() => {
 .block-title {
   font-weight: 600;
   margin-bottom: 8px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--text-hi);
 }
 .images {
   display: flex;
@@ -557,7 +579,8 @@ onMounted(() => {
 .thumb {
   width: 72px;
   height: 72px;
-  border-radius: 4px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-1);
 }
 .prod-cell {
   display: flex;
@@ -565,9 +588,10 @@ onMounted(() => {
   gap: 10px;
 }
 .cover {
-  width: 40px;
-  height: 40px;
-  border-radius: 4px;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-1);
   flex-shrink: 0;
 }
 </style>

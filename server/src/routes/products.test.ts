@@ -15,10 +15,13 @@ beforeEach(async () => {
 
   const cat = await prisma.category.create({ data: { name: '主粮' } });
   const other = await prisma.category.create({ data: { name: '玩具' } });
-  const p1 = await prisma.product.create({ data: { categoryId: cat.id, name: '鸡肉猫粮', subtitle: '高蛋白', coverImage: 'http://img/a.png', status: 'ON', minPrice: 9900 } });
+  // createdAt 显式拉开 1 分钟：两条种子若落在同一毫秒，sort=new 的 createdAt 排序会退化成
+  // 「MySQL 想怎么返回就怎么返回」，断言就会随机失败。
+  const older = new Date(Date.now() - 60_000);
+  const p1 = await prisma.product.create({ data: { categoryId: cat.id, name: '鸡肉猫粮', subtitle: '高蛋白', coverImage: 'http://img/a.png', status: 'ON', minPrice: 9900, createdAt: older } });
   await prisma.sku.create({ data: { productId: p1.id, specName: '2kg', price: 19900, stock: 5 } });
   await prisma.sku.create({ data: { productId: p1.id, specName: '5kg', price: 9900, stock: 3 } });
-  const p2 = await prisma.product.create({ data: { categoryId: other.id, name: '逗猫棒', coverImage: 'http://img/b.png', status: 'ON', minPrice: 1500 } });
+  const p2 = await prisma.product.create({ data: { categoryId: other.id, name: '逗猫棒', coverImage: 'http://img/b.png', status: 'ON', minPrice: 1500, createdAt: new Date() } });
   await prisma.sku.create({ data: { productId: p2.id, specName: '单支', price: 1500, stock: 9 } });
   // 下架商品：不得出现在 C 端
   const off = await prisma.product.create({ data: { categoryId: cat.id, name: '下架商品', coverImage: 'http://img/c.png', status: 'OFF', minPrice: 100 } });

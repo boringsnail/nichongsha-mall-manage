@@ -131,7 +131,7 @@ onMounted(() => load(1));
   flex-shrink: 0;
 }
 .muted {
-  color: #999;
+  color: var(--text-mid);
   font-size: 12px;
 }
 .stock-cell {

@@ -1,96 +1,112 @@
 <template>
-  <div class="dashboard" v-loading="loading">
-    <!-- 顶部：时间范围 + 刷新 -->
-    <div class="toolbar">
-      <el-radio-group v-model="days" size="small" @change="load">
-        <el-radio-button :value="7">近 7 天</el-radio-button>
-        <el-radio-button :value="30">近 30 天</el-radio-button>
-        <el-radio-button :value="90">近 90 天</el-radio-button>
-      </el-radio-group>
-      <el-button size="small" :loading="loading" @click="load">刷新</el-button>
+  <div class="dash" v-loading="loading">
+    <!-- 工具条：范围切换 + 数据时点 -->
+    <div class="bar">
+      <div class="bar-left">
+        <span class="label">range</span>
+        <el-radio-group v-model="days" size="small" @change="load">
+          <el-radio-button :value="7">近 7 天</el-radio-button>
+          <el-radio-button :value="30">近 30 天</el-radio-button>
+          <el-radio-button :value="90">近 90 天</el-radio-button>
+        </el-radio-group>
+      </div>
+      <div class="bar-right">
+        <span class="mono stamp">数据截至 {{ updatedText }}</span>
+        <el-button size="small" :loading="loading" @click="load">刷新</el-button>
+      </div>
     </div>
 
-    <!-- 统计卡片 -->
-    <el-row :gutter="16" class="cards">
-      <el-col v-for="card in statCards" :key="card.label" :span="4">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-label">{{ card.label }}</div>
-          <div class="stat-value">{{ card.value }}</div>
-          <div class="stat-unit">{{ card.unit }}</div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <!-- 趋势图 + 转化漏斗 -->
-    <el-row :gutter="16">
-      <el-col :span="16">
-        <el-card shadow="never" class="panel">
-          <template #header>
-            <div class="panel-head">
-              <span>近 {{ days }} 天经营趋势</span>
-              <span class="legend-hint">GMV（元）· 订单数（单）</span>
-            </div>
-          </template>
-          <div ref="trendRef" class="chart" />
-        </el-card>
-      </el-col>
-      <el-col :span="8">
-        <el-card shadow="never" class="panel">
-          <template #header>转化漏斗（去重会话）</template>
-          <div ref="funnelRef" class="chart" />
-          <div v-if="funnel && funnel.worst" class="funnel-worst">
-            最大流失：{{ funnel.worst.from }} → {{ funnel.worst.to }}
-            <strong>{{ funnel.worst.dropRate }}%</strong>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <!-- 经营建议 -->
-    <el-card shadow="never" class="panel">
-      <template #header>经营建议</template>
-      <div v-if="advice.length === 0" class="empty">
-        暂无建议 —— 当前各项指标均在健康区间
+    <!-- 仪表读数：一格一个指标，发丝线分隔，不做六张卡片 -->
+    <section class="panel kpi-panel">
+      <div v-for="card in statCards" :key="card.label" class="kpi" :class="card.tone">
+        <div class="label">{{ card.label }}</div>
+        <div class="kpi-val">
+          <span class="num">{{ card.value }}</span>
+          <span class="unit">{{ card.unit }}</span>
+        </div>
       </div>
-      <div v-else class="advice-list">
-        <div v-for="(a, i) in advice" :key="i" class="advice-item" :class="a.level">
-          <span class="badge">{{ levelText(a.level) }}</span>
+    </section>
+
+    <!-- 趋势 + 漏斗 -->
+    <div class="grid cols-2-1">
+      <section class="panel">
+        <div class="panel-hd">
+          <span class="rule-title">近 {{ days }} 天经营趋势</span>
+          <span class="label">gmv / orders</span>
+        </div>
+        <div class="panel-bd">
+          <div ref="trendRef" class="chart" />
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-hd">
+          <span class="rule-title">转化漏斗</span>
+          <span class="label">session</span>
+        </div>
+        <div class="panel-bd">
+          <div ref="funnelRef" class="chart" />
+          <div v-if="funnel && funnel.worst" class="worst">
+            最大流失 {{ funnel.worst.from }} → {{ funnel.worst.to }}
+            <strong class="num">{{ funnel.worst.dropRate }}%</strong>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 经营建议：按严重程度排序的待办清单 -->
+    <section class="panel">
+      <div class="panel-hd">
+        <span class="rule-title">经营建议</span>
+        <span class="label">{{ advice.length }} items</span>
+      </div>
+      <div class="panel-bd advice-bd">
+        <div v-if="advice.length === 0" class="empty">各项指标均在健康区间，暂无建议</div>
+        <div v-for="(a, i) in advice" :key="i" class="advice" :class="a.level">
+          <span class="advice-tag mono">{{ levelText(a.level) }}</span>
           <div class="advice-body">
             <div class="advice-title">{{ a.title }}</div>
             <div class="advice-detail">{{ a.detail }}</div>
           </div>
         </div>
       </div>
-    </el-card>
+    </section>
 
     <!-- TOP 商品 + 低库存 -->
-    <el-row :gutter="16">
-      <el-col :span="16">
-        <el-card shadow="never" class="panel">
-          <template #header>近 {{ days }} 天商品销量 TOP {{ topProducts.length || 10 }}</template>
+    <div class="grid cols-2-1">
+      <section class="panel">
+        <div class="panel-hd">
+          <span class="rule-title">商品销量 TOP {{ topProducts.length || 10 }}</span>
+          <span class="label">近 {{ days }} 天</span>
+        </div>
+        <div class="panel-bd">
           <div ref="topRef" class="chart chart-sm" />
-        </el-card>
-      </el-col>
-      <el-col :span="8">
-        <el-card shadow="never" class="panel">
-          <template #header>低库存预警（库存 ≤ 10）</template>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-hd">
+          <span class="rule-title">低库存预警</span>
+          <span class="label">stock ≤ 10</span>
+        </div>
+        <div class="panel-bd lowstock-bd">
           <div v-if="lowStock.length === 0" class="empty">暂无低库存商品</div>
-          <el-table v-else :data="lowStock" size="small" border>
+          <el-table v-else :data="lowStock" size="small">
             <el-table-column label="商品" min-width="120">
               <template #default="{ row }">
                 <div class="prod">{{ row.productName }}</div>
                 <div class="muted">{{ row.specName }}</div>
               </template>
             </el-table-column>
-            <el-table-column label="库存" width="80" align="right">
+            <el-table-column label="库存" width="70" align="right">
               <template #default="{ row }">
-                <el-tag :type="row.stock <= 5 ? 'danger' : 'warning'" size="small">{{ row.stock }}</el-tag>
+                <span class="mono stock" :class="row.stock <= 5 ? 'crit' : 'warn'">{{ row.stock }}</span>
               </template>
             </el-table-column>
           </el-table>
-        </el-card>
-      </el-col>
-    </el-row>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -129,9 +145,30 @@ echarts.use([
   CanvasRenderer,
 ]);
 
-// 品牌色（与小程序设计系统一致）
-const BRAND = '#ff6b35';
-const FUNNEL_COLORS = ['#ff6b35', '#ff8f3c', '#ffa96b', '#ffc59b', '#ffdcc8'];
+// ---- 图表色板：与设计令牌保持一致，canvas 里必须显式给色 ----
+const SIGNAL = '#2ee6c5';
+const AMBER = '#f5b544';
+const AXIS = '#27353d';
+const AXIS_LABEL = '#61747f';
+const TEXT_MID = '#9cb0bb';
+const MONO = 'JetBrains Mono Variable, monospace';
+// 漏斗用信号色的明度阶梯，比彩虹色更像仪表
+const FUNNEL_RAMP = ['#2ee6c5', '#28c4a9', '#22a48d', '#1c8471', '#176556'];
+
+const tooltipStyle = {
+  backgroundColor: '#162127',
+  borderColor: '#27353d',
+  borderWidth: 1,
+  padding: [8, 10] as [number, number],
+  textStyle: { color: '#e9f1f5', fontSize: 11, fontFamily: MONO },
+  extraCssText: 'box-shadow: 0 12px 32px rgba(0,0,0,.55); border-radius: 2px;',
+};
+
+const axisCommon = {
+  axisLine: { lineStyle: { color: AXIS } },
+  axisTick: { show: false },
+  axisLabel: { color: AXIS_LABEL, fontSize: 10, fontFamily: MONO },
+};
 
 const loading = ref(false);
 const days = ref(30);
@@ -141,16 +178,20 @@ const funnel = ref<FunnelData | null>(null);
 const advice = ref<Advice[]>([]);
 const topProducts = ref<TopProduct[]>([]);
 const lowStock = ref<LowStockSku[]>([]);
+const updatedText = ref('—');
 
 const statCards = computed(() => {
   const o = overview.value;
+  const ship = o?.toShip ?? 0;
+  const low = o?.lowStockCount ?? 0;
   return [
-    { label: '今日 GMV', value: o ? fenToYuan(o.today.gmv) : '—', unit: '元' },
-    { label: '今日销量', value: o?.today.salesCount ?? '—', unit: '件' },
-    { label: '今日订单', value: o?.today.orderCount ?? '—', unit: '单' },
-    { label: `近 ${days.value} 天 GMV`, value: o ? fenToYuan(o.week.gmv) : '—', unit: '元' },
-    { label: '待发货', value: o?.toShip ?? '—', unit: '单' },
-    { label: '低库存预警', value: o?.lowStockCount ?? '—', unit: '个 SKU' },
+    { label: '今日 GMV', value: o ? fenToYuan(o.today.gmv) : '—', unit: '元', tone: '' },
+    { label: '今日销量', value: o?.today.salesCount ?? '—', unit: '件', tone: '' },
+    { label: '今日订单', value: o?.today.orderCount ?? '—', unit: '单', tone: '' },
+    { label: `近 ${days.value} 天 GMV`, value: o ? fenToYuan(o.week.gmv) : '—', unit: '元', tone: '' },
+    // 待发货与低库存是「要动手」的指标，用琥珀色跳出来
+    { label: '待发货', value: o?.toShip ?? '—', unit: '单', tone: ship > 0 ? 'warn' : '' },
+    { label: '低库存', value: o?.lowStockCount ?? '—', unit: 'SKU', tone: low > 0 ? 'crit' : '' },
   ];
 });
 
@@ -171,43 +212,70 @@ function renderTrend(points: TrendPoint[]) {
   if (!trendChart) trendChart = echarts.init(trendRef.value);
   trendChart.setOption(
     {
-      tooltip: { trigger: 'axis' },
-      legend: { data: ['GMV', '订单数'], right: 0, top: 0, itemWidth: 12, itemHeight: 8 },
-      grid: { left: 56, right: 56, top: 40, bottom: 32 },
+      tooltip: { trigger: 'axis', ...tooltipStyle, axisPointer: { lineStyle: { color: AXIS } } },
+      legend: {
+        data: ['GMV', '订单数'],
+        right: 0,
+        top: 0,
+        itemWidth: 10,
+        itemHeight: 2,
+        itemGap: 16,
+        textStyle: { color: TEXT_MID, fontSize: 10, fontFamily: MONO },
+      },
+      grid: { left: 52, right: 52, top: 44, bottom: 28 },
       xAxis: {
         type: 'category',
-        data: points.map((p) => p.date.slice(5)), // MM-DD
-        axisLabel: { interval: points.length > 20 ? 'auto' : 0 },
+        data: points.map((p) => p.date.slice(5)),
+        ...axisCommon,
+        axisLabel: { ...axisCommon.axisLabel, interval: points.length > 20 ? 'auto' : 0 },
       },
       yAxis: [
         {
           type: 'value',
-          name: 'GMV(元)',
-          splitLine: { lineStyle: { type: 'dashed' } },
+          name: 'GMV',
+          nameTextStyle: { color: AXIS_LABEL, fontSize: 10, fontFamily: MONO, align: 'right' },
+          ...axisCommon,
+          splitLine: { lineStyle: { color: 'rgba(39,53,61,0.55)', type: 'dashed' } },
           axisLabel: {
+            ...axisCommon.axisLabel,
             formatter: (v: number) => (v >= 10000 ? `${v / 10000}w` : `${v}`),
           },
         },
-        { type: 'value', name: '订单(单)', minInterval: 1, splitLine: { show: false } },
+        {
+          type: 'value',
+          name: '订单',
+          nameTextStyle: { color: AXIS_LABEL, fontSize: 10, fontFamily: MONO },
+          ...axisCommon,
+          minInterval: 1,
+          splitLine: { show: false },
+        },
       ],
       series: [
         {
           name: 'GMV',
           type: 'line',
           smooth: true,
+          symbol: 'circle',
+          symbolSize: 4,
           showSymbol: points.length <= 14,
           data: points.map((p) => Number((p.gmv / 100).toFixed(2))),
-          lineStyle: { width: 2.5, color: BRAND },
-          itemStyle: { color: BRAND },
-          areaStyle: { color: 'rgba(255,107,53,0.12)' },
+          lineStyle: { width: 2, color: SIGNAL },
+          itemStyle: { color: SIGNAL },
+          areaStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: 'rgba(46,230,197,0.22)' },
+              { offset: 1, color: 'rgba(46,230,197,0)' },
+            ]),
+          },
         },
         {
           name: '订单数',
           type: 'bar',
           yAxisIndex: 1,
           data: points.map((p) => p.orderCount),
-          barMaxWidth: 18,
-          itemStyle: { color: BRAND, borderRadius: [3, 3, 0, 0], opacity: 0.65 },
+          barMaxWidth: 10,
+          // 次要序列用低饱和琥珀，避免抢走 GMV 主线的视觉重量
+          itemStyle: { color: 'rgba(245,181,68,0.34)' },
         },
       ],
     },
@@ -225,31 +293,39 @@ function renderFunnel(data: FunnelData | null) {
     {
       tooltip: {
         trigger: 'item',
+        ...tooltipStyle,
         formatter: (p: unknown) => {
           const item = p as { dataIndex: number };
           const s = stages[item.dataIndex];
           if (!s) return '';
-          return `${s.label}<br/>会话数：${s.value}<br/>较首级：${s.rate}%`;
+          return `${s.label}<br/>会话 ${s.value}<br/>较首级 ${s.rate}%`;
         },
       },
       series: [
         {
           type: 'funnel',
-          left: '6%',
-          right: '6%',
-          top: 12,
-          bottom: 12,
-          minSize: '22%',
+          left: '4%',
+          right: '4%',
+          top: 8,
+          bottom: 8,
+          minSize: '24%',
           maxSize: '100%',
           sort: 'none',
-          gap: 3,
-          label: { show: true, position: 'inside', color: '#fff', fontSize: 12 },
+          gap: 2,
+          label: {
+            show: true,
+            position: 'inside',
+            color: '#04201b',
+            fontSize: 11,
+            fontFamily: MONO,
+            fontWeight: 600,
+          },
           labelLine: { show: false },
-          itemStyle: { borderColor: '#fff', borderWidth: 1 },
+          itemStyle: { borderColor: '#111a1e', borderWidth: 1 },
           data: stages.map((s, i) => ({
             name: `${s.label} ${s.rate}%`,
             value: hasData ? s.value : Math.max(stages.length - i, 1),
-            itemStyle: { color: FUNNEL_COLORS[i % FUNNEL_COLORS.length] },
+            itemStyle: { color: FUNNEL_RAMP[i % FUNNEL_RAMP.length] },
           })),
         },
       ],
@@ -265,6 +341,7 @@ function renderTop(products: TopProduct[]) {
     {
       tooltip: {
         trigger: 'axis',
+        ...tooltipStyle,
         formatter: (params: unknown) => {
           const items = params as { name: string; value: number; marker: string }[];
           if (!items.length) return '';
@@ -275,19 +352,25 @@ function renderTop(products: TopProduct[]) {
             .join('<br/>');
         },
       },
-      grid: { left: 48, right: 24, top: 24, bottom: 48 },
+      grid: { left: 44, right: 16, top: 18, bottom: 52 },
       xAxis: {
         type: 'category',
         data: products.map((p) => p.name),
-        axisLabel: { interval: 0, rotate: 20, width: 90, overflow: 'truncate' },
+        ...axisCommon,
+        axisLabel: { ...axisCommon.axisLabel, interval: 0, rotate: 24, width: 84, overflow: 'truncate' },
       },
-      yAxis: { type: 'value', name: '销量（件）', minInterval: 1 },
+      yAxis: {
+        type: 'value',
+        ...axisCommon,
+        minInterval: 1,
+        splitLine: { lineStyle: { color: 'rgba(39,53,61,0.55)', type: 'dashed' } },
+      },
       series: [
         {
           type: 'bar',
           data: products.map((p) => p.salesCount),
-          barMaxWidth: 36,
-          itemStyle: { color: BRAND, borderRadius: [3, 3, 0, 0] },
+          barMaxWidth: 26,
+          itemStyle: { color: SIGNAL, opacity: 0.85 },
         },
       ],
     },
@@ -319,6 +402,7 @@ async function load() {
     advice.value = ad;
     topProducts.value = tp;
     lowStock.value = ls;
+    updatedText.value = new Date().toLocaleTimeString('zh-CN', { hour12: false });
     await nextTick();
     renderTrend(tr);
     renderFunnel(fn);
@@ -347,127 +431,199 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.toolbar {
+.dash {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bar {
+  display: flex;
   align-items: center;
-  margin-bottom: 16px;
+  justify-content: space-between;
+  gap: 12px;
 }
-.cards {
-  margin-bottom: 16px;
+.bar-left,
+.bar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
-.stat-card .stat-label {
-  color: #909399;
-  font-size: 13px;
+.stamp {
+  font-size: 10.5px;
+  color: var(--text-lo);
+  letter-spacing: 0.06em;
 }
-.stat-value {
+
+/* ─────────── 仪表读数条 ─────────── */
+.kpi-panel {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+.kpi {
+  padding: 14px 16px 15px;
+  border-right: 1px solid var(--line-1);
+  min-width: 0;
+}
+.kpi:last-child {
+  border-right: none;
+}
+.kpi-val {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-top: 8px;
+}
+.kpi-val .num {
   font-size: 24px;
-  font-weight: 600;
-  margin-top: 6px;
-  line-height: 1.2;
-  color: #1f2d3d;
+  font-weight: 500;
+  line-height: 1.1;
+  color: var(--text-hi);
 }
-.stat-unit {
-  color: #c0c4cc;
-  font-size: 12px;
-  margin-top: 2px;
+.unit {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-lo);
 }
-.panel {
-  margin-bottom: 16px;
+.kpi.warn .kpi-val .num {
+  color: var(--amber);
 }
-.panel-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.kpi.crit .kpi-val .num {
+  color: var(--red);
 }
-.legend-hint {
-  font-size: 12px;
-  color: #c0c4cc;
-  font-weight: 400;
+
+/* ─────────── 栅格 ─────────── */
+.grid {
+  display: grid;
+  gap: 12px;
 }
+.cols-2-1 {
+  grid-template-columns: minmax(0, 1.95fr) minmax(0, 1fr);
+}
+
 .chart {
-  height: 340px;
+  height: 320px;
 }
 .chart-sm {
-  height: 300px;
+  height: 288px;
 }
+
 .empty {
-  color: #c0c4cc;
+  padding: 22px 0;
   text-align: center;
-  padding: 24px 0;
+  font-size: 12px;
+  color: var(--text-lo);
+}
+
+.worst {
+  margin-top: 8px;
+  padding: 7px 10px;
+  border: 1px solid rgba(245, 181, 68, 0.28);
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 11px;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+.worst strong {
+  font-weight: 600;
+  margin-left: 2px;
+}
+
+/* ─────────── 经营建议：像运维日志 ─────────── */
+.advice-bd {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0;
+}
+.advice {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 16px;
+  border-left: 2px solid var(--line-2);
+  background: transparent;
+  transition: background var(--dur-1) var(--ease);
+}
+.advice:hover {
+  background: rgba(233, 241, 245, 0.02);
+}
+.advice.info {
+  border-left-color: var(--blue);
+}
+.advice.warn {
+  border-left-color: var(--amber);
+}
+.advice.danger {
+  border-left-color: var(--red);
+}
+.advice-tag {
+  flex: none;
+  margin-top: 1px;
+  padding: 1px 6px;
+  border: 1px solid var(--line-2);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--text-lo);
+}
+.advice.info .advice-tag {
+  color: var(--blue);
+  border-color: rgba(106, 168, 255, 0.32);
+}
+.advice.warn .advice-tag {
+  color: var(--amber);
+  border-color: rgba(245, 181, 68, 0.32);
+}
+.advice.danger .advice-tag {
+  color: var(--red);
+  border-color: rgba(255, 95, 87, 0.32);
+}
+.advice-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-hi);
+  margin-bottom: 3px;
+}
+.advice-detail {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-mid);
+}
+
+/* ─────────── 低库存 ─────────── */
+.lowstock-bd {
+  padding: 0;
+}
+.lowstock-bd .el-table {
+  --el-table-border-color: var(--line-1);
 }
 .prod {
   line-height: 1.3;
 }
-.muted {
-  color: #909399;
-  font-size: 12px;
-}
-.funnel-worst {
-  margin-top: 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: #fff7ed;
-  color: #b45309;
-  font-size: 12px;
-  text-align: center;
-}
-.funnel-worst strong {
-  color: #ea580c;
-}
-/* 经营建议 */
-.advice-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.advice-item {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 12px 14px;
-  border-radius: 10px;
-  border-left: 3px solid #dcdfe6;
-  background: #fafafa;
-}
-.advice-item.info {
-  border-left-color: #409eff;
-  background: #f4f9ff;
-}
-.advice-item.warn {
-  border-left-color: #ff8f3c;
-  background: #fff8f2;
-}
-.advice-item.danger {
-  border-left-color: #f56c6c;
-  background: #fef4f4;
-}
-.badge {
-  flex: none;
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  color: #fff;
-  background: #909399;
-}
-.advice-item.info .badge {
-  background: #409eff;
-}
-.advice-item.warn .badge {
-  background: #ff8f3c;
-}
-.advice-item.danger .badge {
-  background: #f56c6c;
-}
-.advice-title {
-  font-weight: 600;
-  font-size: 14px;
-  color: #1f2d3d;
-  margin-bottom: 2px;
-}
-.advice-detail {
+.stock {
   font-size: 13px;
-  color: #606266;
-  line-height: 1.6;
+}
+.stock.warn {
+  color: var(--amber);
+}
+.stock.crit {
+  color: var(--red);
+  font-weight: 600;
+}
+
+@media (max-width: 1280px) {
+  .kpi-panel {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .kpi:nth-child(3n) {
+    border-right: none;
+  }
+  .kpi:nth-child(-n + 3) {
+    border-bottom: 1px solid var(--line-1);
+  }
+  .cols-2-1 {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

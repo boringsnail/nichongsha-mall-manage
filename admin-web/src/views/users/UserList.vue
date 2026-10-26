@@ -210,13 +210,13 @@ onMounted(load);
   gap: 10px;
 }
 .muted {
-  color: #999;
+  color: var(--text-mid);
   font-size: 12px;
 }
 .section-title {
   margin: 20px 0 10px;
   font-size: 14px;
   font-weight: 600;
-  color: #303133;
+  color: var(--text-hi);
 }
 </style>

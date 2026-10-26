@@ -172,11 +172,11 @@ onMounted(load);
   font-weight: 500;
 }
 .subtitle {
-  color: #999;
+  color: var(--text-mid);
   font-size: 12px;
 }
 .muted {
-  color: #bbb;
+  color: var(--text-lo);
 }
 .pager {
   margin-top: 16px;
