@@ -46,6 +46,9 @@ export async function listAdminOrders(query: {
       user: { openid: o.user.openid, nickname: o.user.nickname },
       totalAmount: o.totalAmount,
       freight: o.freight,
+      // 我们付的配送成本（分）：商家在列表里直接录，用于算净营业额
+      deliveryCost: o.deliveryCost,
+      refundedAmount: o.refundedAmount,
       status: o.status,
       remark: o.remark,
       createdAt: o.createdAt,
@@ -60,6 +63,30 @@ export async function listAdminOrders(query: {
     synced,
     serverTime: new Date().toISOString(),
   };
+}
+
+/**
+ * 录入配送成本（我们付给骑手/快递的钱，单位分）。
+ *
+ * 只改 deliveryCost 一列：
+ *   - 不动 totalAmount / freight —— 顾客实付的钱是既成事实，商家改成本不该改账单
+ *   - 已取消的订单没有履约成本，直接拒掉，避免脏数据进净额口径
+ */
+export async function setDeliveryCost(orderNo: string, deliveryCost: number) {
+  const order = await prisma.order.findUnique({
+    where: { orderNo },
+    select: { orderNo: true, status: true, deliveryCost: true },
+  });
+  if (!order) throw notFound('订单不存在');
+  if (order.status === 'CANCELLED') throw orderIllegal('已取消的订单不需要录入配送成本');
+
+  const updated = await prisma.order.update({
+    where: { orderNo },
+    data: { deliveryCost },
+    select: { orderNo: true, deliveryCost: true },
+  });
+
+  return { ...updated, previous: order.deliveryCost };
 }
 
 export async function getAdminOrderDetail(orderNo: string) {
@@ -82,6 +109,8 @@ export async function getAdminOrderDetail(orderNo: string) {
     user: { openid: order.user.openid, nickname: order.user.nickname },
     totalAmount: order.totalAmount,
     freight: order.freight,
+    deliveryCost: order.deliveryCost,
+    refundedAmount: order.refundedAmount,
     status: order.status,
     remark: order.remark,
     paidAt: order.paidAt,

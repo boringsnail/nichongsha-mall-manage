@@ -61,6 +61,24 @@ export function __resetRateLimiter() {
 }
 
 /**
+ * 可选登录解析：埋点不因登录态失效而失败，解析不出来就按游客处理。
+ * 行为埋点与搜索埋点都要用，抽出来避免两处逻辑漂移。
+ */
+async function resolveOptionalUser(req: import('express').Request) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  if (!token) return { userId: undefined, openid: undefined };
+  try {
+    const auth = verifyToken(token);
+    if (auth.role !== 'user') return { userId: undefined, openid: undefined };
+    const u = await prisma.user.findUnique({ where: { id: auth.uid }, select: { openid: true } });
+    return { userId: auth.uid, openid: u?.openid };
+  } catch {
+    return { userId: undefined, openid: undefined };
+  }
+}
+
+/**
  * POST /api/track
  * 小程序行为埋点上报。
  * - 公开接口（未登录访客也要能上报），登录态可选：带 token 时关联 userId
@@ -77,24 +95,7 @@ trackRouter.post(
     }
 
     const b = req.body as z.infer<typeof bodySchema>;
-
-    // 可选登录：解析失败不报错，按游客处理
-    let userId: number | undefined;
-    let openid: string | undefined;
-    const header = req.headers.authorization || '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : '';
-    if (token) {
-      try {
-        const auth = verifyToken(token);
-        if (auth.role === 'user') {
-          userId = auth.uid;
-          const u = await prisma.user.findUnique({ where: { id: auth.uid }, select: { openid: true } });
-          openid = u?.openid;
-        }
-      } catch {
-        /* 忽略：埋点不因登录态失效而失败 */
-      }
-    }
+    const { userId, openid } = await resolveOptionalUser(req);
 
     await prisma.userEvent.create({
       data: {
@@ -112,3 +113,37 @@ trackRouter.post(
     res.json({ code: 0, data: { accepted: true } });
   })
 );
+
+const searchSchema = z.object({
+  // 空串/纯空格直接拒掉：脏词进库后会把「热搜词」搅成噪音
+  keyword: z.string().trim().min(1).max(64),
+  // 命中商品数，0 表示搜了没结果
+  resultCount: z.coerce.number().int().min(0).max(100000).default(0),
+});
+
+/**
+ * POST /api/track/search
+ * 搜索埋点：小程序在搜索结果页上报「搜了什么 + 命中几个」。
+ *
+ * 和 /api/track 分开是因为它写的是另一张表（SearchLog），
+ * 而且商家后台的「搜索分析」完全依赖它，语义比行为埋点更专一。
+ */
+trackRouter.post(
+  '/search',
+  validate({ body: searchSchema }),
+  asyncHandler(async (req, res) => {
+    const ip = req.ip ?? 'unknown';
+    if (rateLimited(ip)) {
+      return res.json({ code: 0, data: { accepted: false } });
+    }
+    const b = req.body as z.infer<typeof searchSchema>;
+    const { userId } = await resolveOptionalUser(req);
+
+    await prisma.searchLog.create({
+      data: { userId: userId ?? null, keyword: b.keyword, resultCount: b.resultCount },
+    });
+
+    res.json({ code: 0, data: { accepted: true } });
+  })
+);
+

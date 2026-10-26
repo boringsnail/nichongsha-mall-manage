@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { validate } from '../middleware/validate.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { listAdminOrders, getAdminOrderDetail, shipOrder, syncAdminOrderFromWechat, syncAdminOrdersFromWechat } from '../services/adminOrderService.js';
+import { listAdminOrders, getAdminOrderDetail, shipOrder, syncAdminOrderFromWechat, syncAdminOrdersFromWechat, setDeliveryCost } from '../services/adminOrderService.js';
 import { diagnoseWechatOrder } from '../services/shippingService.js';
 
 export const adminOrdersRouter = Router();
@@ -48,6 +48,26 @@ adminOrdersRouter.get('/', listQuerySchema, asyncHandler(async (req, res) => {
 adminOrdersRouter.get('/:orderNo', validate({ params: z.object({ orderNo: z.string().regex(/^NPA\d{16}$/) }) }), asyncHandler(async (req, res) => {
   res.json({ code: 0, data: await getAdminOrderDetail(req.params.orderNo) });
 }));
+
+// 录入配送成本（我们付给骑手/快递的钱）：只影响净营业额口径，不动订单金额
+const deliveryCostSchema = validate({
+  params: z.object({ orderNo: z.string().regex(/^NPA\d{16}$/) }),
+  body: z.object({
+    // 分。上限 10000 元，防止手滑多敲几个 0 把净额打成负数
+    deliveryCost: z.coerce.number().int().min(0).max(1_000_000),
+  }),
+});
+
+adminOrdersRouter.put(
+  '/:orderNo/delivery-cost',
+  deliveryCostSchema,
+  asyncHandler(async (req, res) => {
+    res.json({
+      code: 0,
+      data: await setDeliveryCost(req.params.orderNo, req.body.deliveryCost),
+    });
+  })
+);
 
 adminOrdersRouter.post('/:orderNo/ship', shipSchema, asyncHandler(async (req, res) => {
   res.json({ code: 0, data: await shipOrder(req.params.orderNo, req.body) });

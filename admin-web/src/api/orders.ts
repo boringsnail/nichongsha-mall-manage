@@ -7,6 +7,10 @@ export interface AdminOrderRow {
   user: { openid: string; nickname: string | null };
   totalAmount: number;
   freight: number;
+  /** 我们付给骑手/快递的配送成本（分），商家在订单里录入，只影响净营业额 */
+  deliveryCost: number;
+  /** 已退款金额（分） */
+  refundedAmount: number;
   status: OrderStatus;
   remark: string | null;
   createdAt: string;
@@ -107,4 +111,19 @@ export function adminSyncOrderFromWechat(orderNo: string): Promise<WxSyncResult>
 /** 批量对账：近 60 天「已支付 / 已发货」订单逐笔与微信核对 */
 export function adminSyncOrdersFromWechat(): Promise<WxSyncBatchResult> {
   return api.post<WxSyncBatchResult>('/admin/orders/sync-wx');
+}
+
+export interface DeliveryCostResult {
+  orderNo: string;
+  deliveryCost: number;
+  /** 修改前的值，方便前端做撤销提示 */
+  previous: number;
+}
+
+/**
+ * 录入配送成本（我们付给骑手/快递的钱，单位分）。
+ * 只写 deliveryCost 这一列，不动订单金额与运费 —— 顾客付的 freight 是收入侧，这里是成本侧。
+ */
+export function adminSetDeliveryCost(orderNo: string, deliveryCost: number): Promise<DeliveryCostResult> {
+  return api.put<DeliveryCostResult>(`/admin/orders/${orderNo}/delivery-cost`, { deliveryCost });
 }

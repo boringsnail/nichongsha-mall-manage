@@ -41,20 +41,160 @@ export async function overview() {
 }
 
 // 最近 N 天已支付商品的销量/GMV 排行
+//
+// 改成 SQL 聚合：一年（365 天）的明细可能有几万行，拉进内存再分组既慢又费内存；
+// 这里直接 GROUP BY 让 MySQL 出结果，limit 也交给它。
 export async function topProducts(days = 7, limit = 10) {
-  const from = new Date(startOfToday().getTime() - (days - 1) * 86400000);
-  const items = await prisma.orderItem.findMany({
-    where: { order: { status: { in: PAID_STATUSES as never[] }, paidAt: { gte: from } } },
-  });
-  const map = new Map<number, { productId: number; name: string; salesCount: number; gmv: number }>();
-  for (const i of items) {
-    const row = map.get(i.productId) ?? { productId: i.productId, name: i.productName, salesCount: 0, gmv: 0 };
-    row.salesCount += i.quantity;
-    row.gmv += i.price * i.quantity;
-    map.set(i.productId, row);
-  }
-  return [...map.values()].sort((a, b) => b.salesCount - a.salesCount).slice(0, limit);
+  const safeDays = Math.min(Math.max(days, 1), 365);
+  const safeLimit = Math.min(Math.max(limit, 1), 50);
+  const from = new Date(startOfToday().getTime() - (safeDays - 1) * 86400000);
+
+  type Row = {
+    productId: number;
+    name: string;
+    coverImage: string | null;
+    status: string | null;
+    salesCount: bigint;
+    gmv: bigint;
+    orderCount: bigint;
+  };
+  const rows = await prisma.$queryRaw<Row[]>(Prisma.sql`
+    SELECT i.productId                                              AS productId,
+           MAX(i.productName)                                       AS name,
+           MAX(p.coverImage)                                        AS coverImage,
+           MAX(p.status)                                            AS status,
+           COALESCE(SUM(i.quantity), 0)                             AS salesCount,
+           COALESCE(SUM(i.price * i.quantity), 0)                   AS gmv,
+           COUNT(DISTINCT i.orderId)                                AS orderCount
+    FROM OrderItem i
+    JOIN \`Order\` o ON o.id = i.orderId
+    LEFT JOIN Product p ON p.id = i.productId
+    WHERE o.status IN ('PAID','SHIPPED','COMPLETED') AND o.paidAt >= ${from}
+    GROUP BY i.productId
+    ORDER BY salesCount DESC, gmv DESC
+    LIMIT ${safeLimit}
+  `);
+
+  return rows.map((r, idx) => ({
+    rank: idx + 1,
+    productId: Number(r.productId),
+    name: r.name,
+    coverImage: r.coverImage ?? '',
+    status: r.status ?? 'OFF',
+    salesCount: Number(r.salesCount),
+    gmv: Number(r.gmv),
+    orderCount: Number(r.orderCount),
+  }));
 }
+
+/**
+ * 单个商品在 N 天内的每日售卖趋势（销量 + GMV）
+ * 点开 TOP N 的某一行看的就是这个。
+ */
+export async function productTrend(productId: number, days = 30) {
+  const safeDays = Math.min(Math.max(days, 1), 365);
+  const today = startOfToday();
+  const from = new Date(today.getTime() - (safeDays - 1) * 86400000);
+
+  const product = await prisma.product.findUnique({
+    where: { id: productId },
+    select: { id: true, name: true, coverImage: true, status: true, salesCount: true },
+  });
+  if (!product) return null;
+
+  type Row = { d: string; qty: bigint; gmv: bigint; orders: bigint };
+  const rows = await prisma.$queryRaw<Row[]>(Prisma.sql`
+    SELECT ${localDayOf('o.paidAt')}                AS d,
+           COALESCE(SUM(i.quantity), 0)             AS qty,
+           COALESCE(SUM(i.price * i.quantity), 0)   AS gmv,
+           COUNT(DISTINCT i.orderId)                AS orders
+    FROM OrderItem i
+    JOIN \`Order\` o ON o.id = i.orderId
+    WHERE i.productId = ${productId}
+      AND o.status IN ('PAID','SHIPPED','COMPLETED')
+      AND o.paidAt >= ${from}
+    GROUP BY ${localDayOf('o.paidAt')}
+  `);
+  const map = new Map(rows.map((r) => [r.d, r]));
+
+  const points: { date: string; salesCount: number; gmv: number; orderCount: number }[] = [];
+  for (let i = safeDays - 1; i >= 0; i--) {
+    const d = dayKey(new Date(today.getTime() - i * 86400000));
+    const hit = map.get(d);
+    points.push({
+      date: d,
+      salesCount: hit ? Number(hit.qty) : 0,
+      gmv: hit ? Number(hit.gmv) : 0,
+      orderCount: hit ? Number(hit.orders) : 0,
+    });
+  }
+
+  return {
+    productId: product.id,
+    name: product.name,
+    coverImage: product.coverImage,
+    status: product.status,
+    // 建品以来的累计销量，用来和窗口内销量对比（判断是爆款还是刚起量）
+    lifetimeSales: product.salesCount,
+    days: safeDays,
+    totalSales: points.reduce((s, p) => s + p.salesCount, 0),
+    totalGmv: points.reduce((s, p) => s + p.gmv, 0),
+    orderCount: points.reduce((s, p) => s + p.orderCount, 0),
+    points,
+  };
+}
+
+/**
+ * 营收口径（商家最关心的三个数）
+ *
+ *   总营业额 gross  = Σ 订单实付金额（商品 + 顾客付的运费）
+ *   配送成本 deliveryCost = Σ 我们付给骑手/快递的钱（商家在订单里录的）
+ *   退款 refund     = Σ 订单已退金额
+ *   净营业额 net    = gross − refund − deliveryCost
+ *
+ * 只统计「已支付/已发货/已完成」且 paidAt 落在窗口内的订单，
+ * 这样 gross 与 refund 是同一批订单的口径，减出来才有意义。
+ */
+export async function revenue(days = 30) {
+  const safeDays = Math.min(Math.max(days, 1), 365);
+  const from = new Date(startOfToday().getTime() - (safeDays - 1) * 86400000);
+
+  const agg = await prisma.order.aggregate({
+    where: { status: { in: PAID_STATUSES as never[] }, paidAt: { gte: from } },
+    _sum: { totalAmount: true, freight: true, deliveryCost: true, refundedAmount: true },
+    _count: { _all: true },
+  });
+
+  const gross = agg._sum.totalAmount ?? 0;
+  const freight = agg._sum.freight ?? 0;
+  const deliveryCost = agg._sum.deliveryCost ?? 0;
+  const refund = agg._sum.refundedAmount ?? 0;
+  const orderCount = agg._count._all;
+  const net = gross - refund - deliveryCost;
+
+  return {
+    days: safeDays,
+    gross,
+    // 顾客付的运费（已含在 gross 里，单独拆出来便于核对）
+    freight,
+    deliveryCost,
+    refund,
+    net,
+    orderCount,
+    // 客单价与净利率：口径固定成整数分，前端只负责除以 100
+    aov: orderCount > 0 ? Math.round(gross / orderCount) : 0,
+    netRate: gross > 0 ? Number(((net / gross) * 100).toFixed(1)) : 0,
+    // 有多少单还没录配送成本：提示商家去补，否则净额会偏高
+    missingDeliveryCost: await prisma.order.count({
+      where: {
+        status: { in: PAID_STATUSES as never[] },
+        paidAt: { gte: from },
+        deliveryCost: 0,
+      },
+    }),
+  };
+}
+
 
 // 低库存预警：stock ≤ threshold
 export async function lowStock(threshold = 10) {
@@ -97,14 +237,16 @@ export async function trend(days = 30) {
   const today = startOfToday();
   const from = new Date(today.getTime() - (safeDays - 1) * 86400000);
 
-  type OrderRow = { d: string; gmv: bigint; orders: bigint };
+  type OrderRow = { d: string; gmv: bigint; orders: bigint; delivery: bigint; refund: bigint };
   type SaleRow = { d: string; sales: bigint };
 
   const [orderRows, saleRows] = await Promise.all([
     prisma.$queryRaw<OrderRow[]>(Prisma.sql`
       SELECT ${localDayOf('paidAt')} AS d,
              COALESCE(SUM(totalAmount), 0) AS gmv,
-             COUNT(*) AS orders
+             COUNT(*) AS orders,
+             COALESCE(SUM(deliveryCost), 0) AS delivery,
+             COALESCE(SUM(refundedAmount), 0) AS refund
       FROM \`Order\`
       WHERE status IN ('PAID','SHIPPED','COMPLETED') AND paidAt >= ${from}
       GROUP BY ${localDayOf('paidAt')}
@@ -119,18 +261,43 @@ export async function trend(days = 30) {
     `),
   ]);
 
-  const gmvMap = new Map(orderRows.map((r) => [r.d, { gmv: Number(r.gmv), orders: Number(r.orders) }]));
+  const gmvMap = new Map(
+    orderRows.map((r) => [
+      r.d,
+      {
+        gmv: Number(r.gmv),
+        orders: Number(r.orders),
+        deliveryCost: Number(r.delivery),
+        refund: Number(r.refund),
+      },
+    ])
+  );
   const saleMap = new Map(saleRows.map((r) => [r.d, Number(r.sales)]));
 
-  const out: { date: string; gmv: number; orderCount: number; salesCount: number }[] = [];
+  const out: {
+    date: string;
+    gmv: number;
+    orderCount: number;
+    salesCount: number;
+    deliveryCost: number;
+    refund: number;
+    net: number;
+  }[] = [];
   for (let i = safeDays - 1; i >= 0; i--) {
     const d = dayKey(new Date(today.getTime() - i * 86400000));
     const hit = gmvMap.get(d);
+    const gmv = hit?.gmv ?? 0;
+    const deliveryCost = hit?.deliveryCost ?? 0;
+    const refund = hit?.refund ?? 0;
     out.push({
       date: d,
-      gmv: hit?.gmv ?? 0,
+      gmv,
       orderCount: hit?.orders ?? 0,
       salesCount: saleMap.get(d) ?? 0,
+      deliveryCost,
+      refund,
+      // 与大盘营收同口径：净额 = 总额 − 退款 − 配送成本
+      net: gmv - refund - deliveryCost,
     });
   }
   return out;

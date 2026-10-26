@@ -38,6 +38,40 @@
         <template #default="{ row }">{{ fenToYuan(row.totalAmount) }}</template>
       </el-table-column>
       <el-table-column prop="itemCount" label="件数" width="72" align="right" header-align="right" class-name="num-cell" />
+      <!-- 配送成本：我们付给骑手/快递的钱，和顾客付的运费是两个方向，所以单独一列。
+           没录入时显示「+ 录入」的虚线占位，商家扫一眼就知道哪几单还没算成本 -->
+      <el-table-column label="配送成本" width="132" align="right" header-align="right" class-name="num-cell">
+        <template #default="{ row }">
+          <div v-if="editingNo === row.orderNo" class="cost-edit">
+            <el-input-number
+              ref="costInputRef"
+              v-model="editYuan"
+              :min="0"
+              :max="10000"
+              :precision="2"
+              :step="1"
+              size="small"
+              placeholder="0.00"
+              controls-position="right"
+              :disabled="savingCost === row.orderNo"
+              @keyup.enter="commitCost(row)"
+              @keyup.esc="cancelEditCost"
+              @blur="commitCost(row)"
+            />
+          </div>
+          <button
+            v-else-if="row.status !== 'CANCELLED'"
+            type="button"
+            class="cost-btn"
+            :class="{ empty: !row.deliveryCost }"
+            :title="row.deliveryCost ? '点击修改配送成本' : '点击录入配送成本（我们付给骑手/快递的钱）'"
+            @click="startEditCost(row)"
+          >
+            {{ row.deliveryCost ? fenToYuan(row.deliveryCost) : '+ 录入' }}
+          </button>
+          <span v-else class="muted">—</span>
+        </template>
+      </el-table-column>
       <el-table-column label="状态" width="168">
         <template #default="{ row }">
           <!-- 两个标签并排：竖排会把行高从 52 撑到 61，整张表高低不齐 -->
@@ -78,11 +112,21 @@
     <!-- 详情弹窗 -->
     <el-dialog v-model="detailVisible" title="订单详情" width="640px">
       <div v-if="detail" v-loading="detailLoading">
-        <el-descriptions :column="2" border size="small">
+        <el-descriptions :column="2" border size="small" label-width="88">
           <el-descriptions-item label="订单号">{{ detail.orderNo }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ statusText(detail.status) }}</el-descriptions-item>
           <el-descriptions-item label="用户">{{ detail.user.nickname || detail.user.openid }}</el-descriptions-item>
           <el-descriptions-item label="总金额">{{ fenToYuan(detail.totalAmount) }} 元</el-descriptions-item>
+          <!-- 营收三件套：顾客付的运费是收入侧（已含在总金额里），配送成本是成本侧，退款要扣掉 -->
+          <el-descriptions-item label="运费收入">{{ fenToYuan(detail.freight) }} 元</el-descriptions-item>
+          <el-descriptions-item label="配送成本">
+            <span v-if="detail.deliveryCost">{{ fenToYuan(detail.deliveryCost) }} 元</span>
+            <span v-else class="muted">未录入</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="已退款">{{ fenToYuan(detail.refundedAmount) }} 元</el-descriptions-item>
+          <el-descriptions-item label="本单净额">
+            <span class="net-amt">{{ fenToYuan(netOf(detail)) }} 元</span>
+          </el-descriptions-item>
           <el-descriptions-item label="收货人">{{ detail.address.receiverName }} {{ detail.address.phone }}</el-descriptions-item>
           <el-descriptions-item label="收货地址">{{ detail.address.province }}{{ detail.address.city }}{{ detail.address.district }}{{ detail.address.detail }}</el-descriptions-item>
           <el-descriptions-item label="发货方式" :span="2">
@@ -98,11 +142,18 @@
           </el-descriptions-item>
           <el-descriptions-item v-if="detail.remark" label="备注" :span="2">{{ detail.remark }}</el-descriptions-item>
         </el-descriptions>
+        <div class="net-hint">
+          运费收入已含在总金额里；本单净额 = 总金额 {{ fenToYuan(detail.totalAmount) }} − 退款
+          {{ fenToYuan(detail.refundedAmount) }} − 配送成本 {{ fenToYuan(detail.deliveryCost) }}
+          <template v-if="!detail.deliveryCost">（未录入配送成本，录入后会同步到营业大盘）</template>
+        </div>
         <el-table :data="detail.items" border size="small" class="item-table">
           <el-table-column label="商品">
             <template #default="{ row }">
               <div class="prod-cell">
-                <el-image :src="row.coverImage" fit="cover" class="cover" />
+                <!-- 没封面时 el-image 会渲染「加载失败」把 38px 的框撑破 -->
+                <el-image v-if="row.coverImage" :src="row.coverImage" fit="cover" class="cover" />
+                <div v-else class="cover ph">无图</div>
                 <div>
                   <div>{{ row.productName }}</div>
                   <div class="muted">{{ row.specName }}</div>
@@ -176,13 +227,14 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import {
   adminListOrders,
   adminGetOrder,
   adminShipOrder,
+  adminSetDeliveryCost,
   adminSyncOrderFromWechat,
   adminSyncOrdersFromWechat,
   LOGISTICS_TYPE,
@@ -190,7 +242,7 @@ import {
   type AdminOrderRow,
   type OrderStatus,
 } from '@/api/orders';
-import { fenToYuan } from '@/utils/money';
+import { fenToYuan, yuanToFen } from '@/utils/money';
 
 const statusOptions: { label: string; value: OrderStatus }[] = [
   { label: '待支付', value: 'PENDING_PAYMENT' },
@@ -258,6 +310,10 @@ const afterSaleText = (s: string) => AFTER_SALE_TEXT[s] ?? s;
 const afterSaleTag = (s: string): TagType => AFTER_SALE_TAG[s] ?? 'info';
 
 const formatTime = (t: string) => new Date(t).toLocaleString('zh-CN', { hour12: false });
+
+/** 单笔净额 = 总金额 − 退款 − 配送成本，和大盘净营业额同一个口径 */
+const netOf = (o: { totalAmount: number; refundedAmount: number; deliveryCost: number }) =>
+  o.totalAmount - o.refundedAmount - o.deliveryCost;
 
 const router = useRouter();
 const route = useRoute();
@@ -354,11 +410,12 @@ async function load(opts: { silent?: boolean; withSync?: boolean } = {}) {
   }
 }
 
-/** 一轮自动同步：切到后台标签页、或弹窗开着时跳过，别和用户抢内容 */
+/** 一轮自动同步：切到后台标签页、弹窗开着、或正在录配送成本时跳过，别和用户抢内容 */
 async function tick() {
   if (!autoSync.value || ticking) return;
   if (document.hidden) return;
   if (detailVisible.value || shipVisible.value) return;
+  if (editingNo.value) return;
   ticking = true;
   try {
     await load({ silent: true, withSync: true });
@@ -445,6 +502,57 @@ async function syncOne(orderNo: string) {
     await load();
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '同步失败');
+  }
+}
+
+/* ------------------------------------------------------------ 配送成本录入
+ * 商家通常等快递/骑手结完账才知道这单花了多少运费，所以放在列表里就地改：
+ * 点数字 → 变输入框 → 回车/失焦保存。只写 deliveryCost 一列，不动订单金额。
+ */
+const editingNo = ref('');
+/** 编辑中的值（元）；undefined 表示还没输入 */
+const editYuan = ref<number | undefined>(undefined);
+/** 正在保存的订单号，用来禁用输入框防重复提交 */
+const savingCost = ref('');
+/** 输入框实例，点开就聚焦，省一次点击 */
+const costInputRef = ref<{ focus: () => void } | null>(null);
+
+function startEditCost(row: AdminOrderRow) {
+  editingNo.value = row.orderNo;
+  // 已录入过就带出来，方便微调；没录过留空，避免误以为默认 0 元
+  editYuan.value = row.deliveryCost > 0 ? row.deliveryCost / 100 : undefined;
+  nextTick(() => costInputRef.value?.focus());
+}
+
+function cancelEditCost() {
+  editingNo.value = '';
+  editYuan.value = undefined;
+}
+
+async function commitCost(row: AdminOrderRow) {
+  // 回车与失焦都会触发，靠这一行把第二次调用挡掉
+  if (editingNo.value !== row.orderNo || savingCost.value) return;
+  const yuan = editYuan.value;
+  if (yuan === undefined || yuan === null || Number.isNaN(yuan)) {
+    cancelEditCost();
+    return;
+  }
+  const fen = yuanToFen(yuan);
+  if (fen === row.deliveryCost) {
+    cancelEditCost();
+    return;
+  }
+  savingCost.value = row.orderNo;
+  try {
+    const r = await adminSetDeliveryCost(row.orderNo, fen);
+    // 就地改行数据而不是整表刷新：5 秒轮询刚好在打字时把行换掉会很难受
+    row.deliveryCost = r.deliveryCost;
+    ElMessage.success(`配送成本已记为 ${fenToYuan(r.deliveryCost)} 元`);
+    cancelEditCost();
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '保存失败');
+  } finally {
+    savingCost.value = '';
   }
 }
 
@@ -610,6 +718,61 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
 }
 
+/* 配送成本：平时是「隐形」的纯数字，hover 才浮出可点的框，表格不至于全是控件；
+   没录入时用虚线占位，一眼看出哪几单还缺成本 */
+.cost-btn {
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  background: none;
+  color: var(--text-hi);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-1) var(--ease),
+    background-color var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease);
+}
+.cost-btn:hover {
+  border-color: var(--signal-border);
+  background: var(--signal-soft);
+  color: var(--signal);
+}
+.cost-btn.empty {
+  border-style: dashed;
+  border-color: var(--line-3);
+  color: var(--text-lo);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+}
+.cost-btn.empty:hover {
+  border-style: solid;
+  border-color: var(--signal-border);
+  color: var(--signal);
+}
+.cost-edit :deep(.el-input-number) {
+  width: 108px;
+}
+.cost-edit :deep(.el-input__inner) {
+  text-align: right;
+  font-family: var(--font-mono);
+}
+.net-amt {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--signal);
+  font-weight: 600;
+}
+/* 详情里的净额算式：把口径写死给商家看，省得反复解释 */
+.net-hint {
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-lo);
+}
+
 .pager {
   margin-top: 14px;
   justify-content: flex-end;
@@ -651,6 +814,16 @@ onBeforeUnmount(() => {
   border-radius: var(--r-1);
   flex-shrink: 0;
   border: 1px solid var(--line-1);
+}
+.cover.ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  border-color: var(--line-3);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--text-lo);
 }
 
 /* 动效敏感的人：呼吸灯和高亮直接关掉，状态本身仍然在更新 */

@@ -137,6 +137,30 @@ model User {
   carts      Cart[]
   orders     Order[]
   afterSales AfterSale[]
+  searches   SearchLog[]
+}
+
+/// 搜索记录：小程序每次搜索上报一条，用于「搜索分析」。
+///
+/// 刻意不建外键约束到 User（userId 可空）：未登录也能搜，且埋点不该因为
+/// 用户被删而连带失败。userId 只作为聚合维度用。
+model SearchLog {
+  id          Int      @id @default(autoincrement())
+  /// 搜索的人；未登录为 null
+  userId      Int?
+  /// 搜索词（去掉首尾空白，最长 64）
+  keyword     String   @db.VarChar(64)
+  /// 这次搜索命中的商品数；0 表示「搜了但没结果」，是最有价值的一类
+  resultCount Int      @default(0)
+  /// 来源：miniprogram / admin（后台暂不埋点，留字段便于以后区分）
+  source      String   @default("miniprogram") @db.VarChar(16)
+  createdAt   DateTime @default(now())
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([keyword])
+  @@map("SearchLog")
 }
 
 model Address {
@@ -210,7 +234,11 @@ model Order {
   orderNo          String      @unique
   userId           Int
   totalAmount      Int
+  // 顾客实付的运费（分）：下单时算出来，计入总营业额
   freight          Int         @default(0)
+  // 我们实际付给骑手/快递的配送成本（分）：商家在订单管理里录入。
+  // 和 freight 是两个方向的钱，所以单独一列；净营业额要把它扣掉。
+  deliveryCost     Int         @default(0)
   status           OrderStatus @default(PENDING_PAYMENT)
   // 收货地址 JSON 快照：默认 VARCHAR(191) 会截断，显式加长
   addressSnapshot  String      @db.VarChar(1024)
