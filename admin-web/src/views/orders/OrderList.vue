@@ -26,11 +26,12 @@
         <template #default="{ row }">{{ fenToYuan(row.totalAmount) }}</template>
       </el-table-column>
       <el-table-column prop="itemCount" label="件数" width="72" align="right" header-align="right" class-name="num-cell" />
-      <el-table-column label="状态" width="160">
+      <el-table-column label="状态" width="168">
         <template #default="{ row }">
-          <el-tag :type="statusTag(row.status)">{{ statusText(row.status) }}</el-tag>
-          <div v-if="row.afterSaleStatus" class="as-tag">
-            <el-tag size="small" :type="afterSaleTag(row.afterSaleStatus)">
+          <!-- 两个标签并排：竖排会把行高从 52 撑到 61，整张表高低不齐 -->
+          <div class="tag-row">
+            <el-tag :type="statusTag(row.status)">{{ statusText(row.status) }}</el-tag>
+            <el-tag v-if="row.afterSaleStatus" size="small" :type="afterSaleTag(row.afterSaleStatus)">
               {{ afterSaleText(row.afterSaleStatus) }}
             </el-tag>
           </div>
@@ -427,8 +428,11 @@ onMounted(async () => {
   margin-left: 8px;
   font-family: var(--font-mono);
 }
-.as-tag {
-  margin-top: 4px;
+.tag-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 .item-table {
   margin-top: 12px;
