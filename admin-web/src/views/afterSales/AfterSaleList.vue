@@ -58,10 +58,10 @@
     <el-table v-loading="loading" :data="rows" class="as-table">
       <el-table-column prop="afterSaleNo" label="售后单号" width="170" />
       <el-table-column prop="orderNo" label="订单号" width="170" />
-      <el-table-column label="用户" width="120">
+      <el-table-column label="用户" width="140">
         <template #default="{ row }">
           <div>{{ row.user?.nickname || '微信用户' }}</div>
-          <div class="muted">{{ row.user?.openid }}</div>
+          <div class="muted uid" :title="row.user?.openid">{{ row.user?.openid }}</div>
         </template>
       </el-table-column>
       <el-table-column label="类型" width="92">
@@ -560,6 +560,12 @@ onMounted(() => {
 .muted {
   color: var(--text-lo);
   font-size: 11.5px;
+}
+/* openid 有 28 位，不截断会把行高撑到三行；单行省略 + title 悬浮看全量 */
+.uid {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .block {
   margin-top: 16px;
