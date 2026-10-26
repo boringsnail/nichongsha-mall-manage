@@ -799,11 +799,12 @@ const prodDays = ref(30);
 const prodChartRef = ref<HTMLElement | null>(null);
 let prodChart: ECharts | null = null;
 
-/** 日均销量：窗口长短不同时也能横向比 */
+/** 日均销量：窗口长短不同时也能横向比；小店铺一年卖几件，一位小数会全变成 0.0 */
 const prodDaily = computed(() => {
   const t = prodTrend.value;
   if (!t || !t.days) return '—';
-  return (t.totalSales / t.days).toFixed(1);
+  const v = t.totalSales / t.days;
+  return v >= 0.1 ? v.toFixed(1) : v.toFixed(2);
 });
 
 async function openProductTrend(productId: number) {
