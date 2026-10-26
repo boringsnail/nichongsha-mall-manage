@@ -38,6 +38,16 @@ function platformOpenid(req: Request): string | undefined {
   return openid && source ? openid : undefined;
 }
 
+/**
+ * 取登录留痕需要的请求上下文。
+ * 走 nginx / 云托管时 socket 地址是内网 IP，优先用 X-Forwarded-For 首段。
+ */
+function loginMeta(req: Request, via: string) {
+  const xff = req.header('x-forwarded-for');
+  const ip = xff?.split(',')[0].trim() || req.socket?.remoteAddress || undefined;
+  return { ip, userAgent: req.header('user-agent') || undefined, via };
+}
+
 // 微信登录：
 //   ① 云托管 callContainer 注入 openid → 直接建会话（零出网，推荐）
 //   ② 否则用小程序 code 走 code2Session（需容器可访问 api.weixin.qq.com）
@@ -45,18 +55,18 @@ function platformOpenid(req: Request): string | undefined {
 authRouter.post('/login', loginSchema, asyncHandler(async (req, res) => {
   const openid = platformOpenid(req);
   if (openid) {
-    res.json({ code: 0, data: await loginWithOpenid(openid) });
+    res.json({ code: 0, data: await loginWithOpenid(openid, loginMeta(req, 'cloud')) });
     return;
   }
   const code = req.body.code as string | undefined;
   if (!code) throw new HttpError(400, 'PARAM_ERROR', '缺少 code');
-  res.json({ code: 0, data: await loginWithCode(code, req.body.deviceId) });
+  res.json({ code: 0, data: await loginWithCode(code, req.body.deviceId, loginMeta(req, 'code')) });
 }));
 
 // 开发期快捷登录：仅非生产环境挂载（生产环境必须配置微信登录，见 env.ts 启动校验）
 if (env.devMode) {
   authRouter.post('/dev-login', codeSchema, asyncHandler(async (req, res) => {
-    res.json({ code: 0, data: await loginWithCode(req.body.code, req.body.deviceId) });
+    res.json({ code: 0, data: await loginWithCode(req.body.code, req.body.deviceId, loginMeta(req, 'dev')) });
   }));
 }
 

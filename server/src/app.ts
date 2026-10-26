@@ -20,6 +20,7 @@ import { announcementRouter } from './routes/announcement.js';
 import { adminUsersRouter } from './routes/adminUsers.js';
 import { afterSalesRouter } from './routes/afterSales.js';
 import { adminStatsRouter } from './routes/adminStats.js';
+import { adminVisitsRouter } from './routes/adminVisits.js';
 import { productsRouter, categoriesRouter } from './routes/products.js';
 import { trackRouter } from './routes/track.js';
 import { payRouter } from './routes/pay.js';
@@ -100,6 +101,7 @@ export function createApp() {
   app.use('/api/admin/config', requireAuth('merchant'), adminConfigRouter);
   app.use('/api/admin/users', requireAuth('merchant'), adminUsersRouter);
   app.use('/api/admin/stats', requireAuth('merchant'), adminStatsRouter);
+  app.use('/api/admin/visits', requireAuth('merchant'), adminVisitsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

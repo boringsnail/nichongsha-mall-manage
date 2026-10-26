@@ -138,6 +138,33 @@ model User {
   orders     Order[]
   afterSales AfterSale[]
   searches   SearchLog[]
+  loginLogs  LoginLog[]
+}
+
+/// 登录记录：小程序每次 wx.login 换会话时写一条。
+///
+/// 以前只在 JWT 里签发会话，登录这件事本身不留痕，商家问「这个用户多久来一次」
+/// 完全答不上来。这里只记「谁、什么时候、从哪、什么设备」，不记密码/凭证。
+/// userId 允许为空（用户被删后历史记录仍保留，onDelete: SetNull）。
+model LoginLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  /// 登录时的 openid 快照：用户被删了也还能看出是谁
+  openid    String   @db.VarChar(64)
+  /// 登录方式：cloud（云托管注入 openid）/ code（code2Session）/ dev（开发期 mock）
+  via       String?  @db.VarChar(16)
+  /// 来源端：miniprogram / admin（目前只记小程序，字段留着以后扩展）
+  source    String   @default("miniprogram") @db.VarChar(16)
+  ip        String?  @db.VarChar(64)
+  userAgent String?  @db.VarChar(256)
+  /// 这次登录是否顺带注册了新用户
+  isNewUser Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@map("LoginLog")
 }
 
 /// 搜索记录：小程序每次搜索上报一条，用于「搜索分析」。

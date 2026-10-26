@@ -219,12 +219,15 @@ const NAV: NavGroup[] = [
   {
     code: '03 / crm',
     title: '客户',
-    items: [{ idx: '08', path: '/users', label: '用户管理' }],
+    items: [
+      { idx: '08', path: '/users', label: '用户管理' },
+      { idx: '09', path: '/visits', label: '用户访问' },
+    ],
   },
   {
     code: '04 / system',
     title: '设置',
-    items: [{ idx: '09', path: '/settings', label: '配置管理' }],
+    items: [{ idx: '10', path: '/settings', label: '配置管理' }],
   },
 ];
 

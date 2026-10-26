@@ -4,8 +4,44 @@ import { verifyPassword } from '../auth/password.js';
 import { HttpError, unauthorized } from '../utils/HttpError.js';
 import { env } from '../config/env.js';
 
+/** 登录留痕用的请求上下文（由路由层从 req 里取，服务层不依赖 express） */
+export interface LoginMeta {
+  ip?: string;
+  userAgent?: string;
+  /** 登录方式：cloud（云托管注入 openid）/ code（code2Session）/ dev（开发期 mock） */
+  via?: string;
+}
+
+/**
+ * 写一条登录记录。
+ *
+ * **绝不能因为写日志失败而让用户登不进去** —— 登录记录是「锦上添花」，
+ * 表没建出来、字段超长之类的问题只该留在容器日志里。
+ */
+async function recordLogin(input: {
+  userId: number;
+  openid: string;
+  isNewUser: boolean;
+  meta?: LoginMeta;
+}) {
+  try {
+    await prisma.loginLog.create({
+      data: {
+        userId: input.userId,
+        openid: input.openid,
+        via: input.meta?.via?.slice(0, 16) ?? null,
+        ip: input.meta?.ip?.slice(0, 64) ?? null,
+        userAgent: input.meta?.userAgent?.slice(0, 256) ?? null,
+        isNewUser: input.isNewUser,
+      },
+    });
+  } catch (error) {
+    console.error('[login-log] 写入登录记录失败（不影响登录）:', error instanceof Error ? error.message : error);
+  }
+}
+
 // 微信登录：配置了 AppID/Secret 走真实 code2Session，否则 mock openid（仅开发期）
-export async function loginWithCode(code: string, deviceId?: string) {
+export async function loginWithCode(code: string, deviceId?: string, meta?: LoginMeta) {
   let openid: string;
 
   if (env.wxAppid && env.wxSecret) {
@@ -49,11 +85,15 @@ export async function loginWithCode(code: string, deviceId?: string) {
     openid = `dev-${deviceId || code}`;
   }
 
+  // 先查一次再 upsert：upsert 不告诉你「这次是新建还是命中已有」，
+  // 而「新客首登」正是登录记录里最值钱的一列
+  const existing = await prisma.user.findUnique({ where: { openid }, select: { id: true } });
   const user = await prisma.user.upsert({
     where: { openid },
     update: {},
     create: { openid },
   });
+  await recordLogin({ userId: user.id, openid, isNewUser: !existing, meta });
 
   return {
     token: signUserToken(user.id),
@@ -66,8 +106,10 @@ export async function loginWithCode(code: string, deviceId?: string) {
  * 直接用它 upsert 用户并签发会话。**无需出网调 code2Session、无需 AppSecret**，
  * 因此不受容器出网策略影响（这正是审核期「登录失败/白屏」的根治方案）。
  */
-export async function loginWithOpenid(openid: string) {
+export async function loginWithOpenid(openid: string, meta?: LoginMeta) {
+  const existing = await prisma.user.findUnique({ where: { openid }, select: { id: true } });
   const user = await prisma.user.upsert({ where: { openid }, update: {}, create: { openid } });
+  await recordLogin({ userId: user.id, openid, isNewUser: !existing, meta });
   return {
     token: signUserToken(user.id),
     user: { id: user.id, nickname: user.nickname, avatarUrl: user.avatarUrl },
