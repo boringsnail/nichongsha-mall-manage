@@ -152,11 +152,12 @@
       <section class="panel">
         <div class="panel-hd">
           <span class="rule-title">低库存预警</span>
-          <span class="label">stock ≤ 10</span>
+          <!-- 真实店铺常有几百个 0 库存 SKU，这里只报数量，明细去库存管理看 -->
+          <span class="label">{{ lowStock.length }} sku · stock ≤ 10</span>
         </div>
         <div class="panel-bd lowstock-bd">
           <div v-if="lowStock.length === 0" class="empty">暂无低库存商品</div>
-          <el-table v-else :data="lowStock" size="small">
+          <el-table v-else :data="lowStock" size="small" max-height="258">
             <el-table-column label="商品" min-width="120">
               <template #default="{ row }">
                 <div class="prod">{{ row.productName }}</div>
@@ -169,6 +170,9 @@
               </template>
             </el-table-column>
           </el-table>
+          <router-link v-if="lowStock.length > 8" to="/stock" class="lowstock-more">
+            共 {{ lowStock.length }} 个 SKU 待补货，去库存管理 →
+          </router-link>
         </div>
       </section>
     </div>
@@ -1216,6 +1220,18 @@ onBeforeUnmount(() => {
 .stock.crit {
   color: var(--red);
   font-weight: 600;
+}
+.lowstock-more {
+  display: block;
+  margin-top: 8px;
+  padding: 0 14px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-lo);
+  text-decoration: none;
+}
+.lowstock-more:hover {
+  color: var(--signal);
 }
 
 /* ─────────── 营收口径：一条算式 ─────────── */
