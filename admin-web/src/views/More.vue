@@ -20,7 +20,6 @@
           <span class="row-label">{{ it.label }}</span>
           <span class="row-desc">{{ it.desc }}</span>
         </span>
-        <span v-if="badgeOf(it)" class="row-badge mono" :class="it.tone">{{ badgeOf(it) }}</span>
         <span class="row-arrow">›</span>
       </router-link>
     </section>
@@ -49,8 +48,6 @@ interface MoreItem {
   path: string;
   label: string;
   desc: string;
-  badge?: 'ship' | 'sale';
-  tone?: 'signal' | 'amber';
 }
 interface MoreGroup {
   title: string;
@@ -59,16 +56,8 @@ interface MoreGroup {
 
 const GROUPS: MoreGroup[] = [
   {
-    title: '运营',
-    items: [
-      { idx: '03', path: '/after-sales', label: '售后管理', desc: '退款 / 退货处理', badge: 'sale', tone: 'amber' },
-      { idx: '02', path: '/orders', label: '订单管理', desc: '发货 / 配送成本', badge: 'ship', tone: 'signal' },
-    ],
-  },
-  {
     title: '商品',
     items: [
-      { idx: '04', path: '/products', label: '商品管理', desc: '上下架 / 编辑' },
       { idx: '05', path: '/products/import', label: '批量导入', desc: 'CSV 一次性录多规格' },
       { idx: '06', path: '/categories', label: '分类管理', desc: '重命名 / 排序' },
       { idx: '07', path: '/stock', label: '库存管理', desc: '按 SKU 改库存' },
@@ -94,12 +83,6 @@ const store = useAlertStore();
 const merchantName = computed(() => auth.merchant?.nickname || auth.merchant?.username || '商家');
 // 版本号跟 android/app/build.gradle 的 versionName 对齐，装错包时能一眼看出来
 const version = '1.0.0';
-
-function badgeOf(it: MoreItem): number {
-  if (it.badge === 'ship') return store.pendingShipCount;
-  if (it.badge === 'sale') return store.pendingAfterSaleCount;
-  return 0;
-}
 
 function logout() {
   store.stop();
