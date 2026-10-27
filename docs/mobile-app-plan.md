@@ -179,12 +179,16 @@ admin-app/                 # 新增：原生壳工程（不含业务代码）
 
 ---
 
-## 十、待确认的 4 个问题
+## 十、已确认的决策（2026-10-27）
 
-1. **iOS 怎么分发**：TestFlight 内测 / App Store 公开 / ABM 自定（只给自己的商家）？
-2. **推送要不要做**：先用 App 内轮询 + 语音提醒（0 成本），还是直接上厂商推送通道？
-3. **要不要上国内安卓商店**：只内测分发 APK，还是走华为/小米等商店（需软著）？
-4. **App 里要不要保留 Web 版全部功能**：比如批量导入（手机选文件不如电脑顺手），是否只在 App 里保留查看？
+| 问题 | 结论 |
+| --- | --- |
+| 技术路线 | **A · Capacitor 混合** |
+| iOS 分发 | **先只做 Android**，iOS 待后续（工程已预留 `npx cap add ios`） |
+| 订单推送 | **先轮询 + 语音**（沿用现有 5s 轮询，不接厂商通道） |
+| 安卓交付 | **先出签名 APK 内测**，暂不上架商店 |
+
+因此首版范围收敛为：Android APK + 全站手机端适配 + 状态栏跟随主题，不含推送插件。
 
 ---
 
@@ -194,4 +198,10 @@ admin-app/                 # 新增：原生壳工程（不含业务代码）
 - `admin-web/src/views/Layout.vue`：侧栏 → 抽屉，顶部汉堡菜单，路由切换自动收起
 - `admin-web/index.html`：`viewport-fit=cover`（刘海屏/全面屏适配）
 - `admin-web/src/views/Dashboard.vue`、`Visits.vue`：六格读数 2×3、搜索分析上下排、单品趋势 2×2
-- 本机 Android 构建环境：SDK 35 + build-tools 35 + JDK 21（可直接产出 APK）
+- 订单 / 商品 / 售后：窄屏改卡片流（表格 8 列在 390px 下只能横滑，固定列还会盖住内容）
+- 用户管理：窄屏隐藏 ID / 消费 / 单数 / 最近成交 / 注册时间，把消费与单数压进用户格
+- `admin-app/`：Capacitor 7 壳工程，appId `cn.nichongsha.admin`，含图标、启动图、发布签名
+- 后端：CORS 放行 `https://localhost` / `capacitor://localhost`（WebView 来源）
+- 本机 Android 构建环境：SDK 35 + build-tools 35 + JDK 21
+
+**产物**：`dist/nichongsha-admin-1.0.0.apk`（3.9 MB，已签名，minSdk 23 / targetSdk 35）
