@@ -374,8 +374,52 @@ onMounted(async () => {
   font-size: 12px;
 }
 code {
-  background: #f2f3f5;
+  /* 原来写死 #f2f3f5，深色主题下是白底白字；改用令牌 */
+  background: var(--ink-820);
   padding: 1px 4px;
   border-radius: 3px;
+}
+
+/* ─────────── 手机：卡片内全部改竖排，拖拽区改成点击选择 ─────────── */
+@media (max-width: 900px) {
+  .intro-head {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .intro-head .el-button {
+    width: 100%;
+    margin-left: 0;
+  }
+  .intro-desc {
+    font-size: 12.5px;
+  }
+  .drop {
+    padding: 14px 0;
+  }
+  /* 手机上没有「拖拽」这回事，文案直接说点击 */
+  .drop-icon {
+    font-size: 24px;
+  }
+  .row {
+    flex-wrap: wrap;
+  }
+  .row .el-button {
+    flex: 1;
+    margin-left: 0;
+  }
+  .opt {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .opt .el-radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: flex-start;
+  }
+  .result-head {
+    flex-wrap: wrap;
+  }
 }
 </style>

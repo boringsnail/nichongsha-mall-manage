@@ -33,7 +33,7 @@
     </div>
     <div class="cmdbar">
       <div class="cmd-left">
-        <span class="label">search</span>
+        <span class="label">搜索</span>
         <el-input
           v-model="keyword"
           placeholder="售后单号 / 订单号"
@@ -235,7 +235,8 @@
             <el-table-column label="商品">
               <template #default="{ row }">
                 <div class="prod-cell">
-                  <el-image :src="row.coverImage" fit="cover" class="cover" />
+                  <img v-if="row.coverImage" :src="mediaSrc(row.coverImage)" class="cover" alt="" />
+                <div v-else class="cover ph">无图</div>
                   <div>
                     <div>{{ row.productName }}</div>
                     <div class="muted">{{ row.specName }}</div>
@@ -304,6 +305,7 @@
 
 <script setup lang="ts">
 import { useIsMobile } from '@/composables/useIsMobile';
+import { mediaSrc } from '@/api/media';
 import { onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';

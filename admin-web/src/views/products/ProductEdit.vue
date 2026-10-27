@@ -14,16 +14,12 @@
         </el-select>
         <el-button link type="primary" @click="openCategoryDialog">管理分类</el-button>
       </el-form-item>
-      <el-form-item label="封面图 URL" prop="coverImage">
-        <el-input v-model="form.coverImage" placeholder="https://... 图片直链" />
+      <el-form-item label="封面图" prop="coverImage">
+        <!-- 手机上不该出现「填 URL」这种东西：商家相册里只有照片 -->
+        <ImagePicker v-model="coverList" :max="1" />
       </el-form-item>
-      <el-form-item label="详情图 URL">
-        <el-input
-          v-model="imagesText"
-          type="textarea"
-          :rows="3"
-          placeholder="每行一个图片 URL，选填"
-        />
+      <el-form-item label="详情图">
+        <ImagePicker v-model="detailImages" :max="6" />
       </el-form-item>
       <el-form-item label="商品描述" prop="description">
         <el-input v-model="form.description" type="textarea" :rows="4" placeholder="图文/参数说明，选填" />
@@ -33,26 +29,35 @@
         <div class="sku-rows">
           <div v-for="(sku, i) in form.skus" :key="i" class="sku-row">
             <el-input v-model="sku.specName" placeholder="规格名，如 2kg" class="sku-spec" />
-            <el-input-number
-              v-model="sku.priceYuan"
-              :min="0"
-              :precision="2"
-              :step="1"
-              :controls="false"
-              class="sku-price"
-              placeholder="价格（元）"
-            />
-            <el-input-number v-model="sku.stock" :min="0" :step="1" class="sku-stock" placeholder="库存" />
-            <el-button link type="danger" :disabled="form.skus.length <= 1" @click="removeSku(i)">删除</el-button>
+            <div class="sku-field sku-price">
+              <!-- 库存默认 0，el-input-number 有值时 placeholder 不显示，手机上就分不清哪个是价格哪个是库存 -->
+              <span class="sku-flabel">价格（元）</span>
+              <el-input-number
+                v-model="sku.priceYuan"
+                :min="0"
+                :precision="2"
+                :step="1"
+                :controls="false"
+                placeholder="0.00"
+              />
+            </div>
+            <div class="sku-field sku-stock">
+              <span class="sku-flabel">库存</span>
+              <el-input-number v-model="sku.stock" :min="0" :step="1" controls-position="right" placeholder="0" />
+            </div>
+            <el-button link type="danger" class="sku-del" :disabled="form.skus.length <= 1" @click="removeSku(i)">
+              删除
+            </el-button>
           </div>
-          <el-button type="primary" plain size="small" @click="addSku">+ 添加规格</el-button>
+          <el-button type="primary" plain size="small" class="sku-add" @click="addSku">+ 添加规格</el-button>
         </div>
       </el-form-item>
 
-      <el-form-item>
+      <!-- 手机上表单很长，保存按钮跟着屏幕走，省得划到最底下 -->
+      <div class="submit-bar">
         <el-button type="primary" :loading="submitting" @click="onSubmit">保存</el-button>
         <el-button @click="routerBack">取消</el-button>
-      </el-form-item>
+      </div>
     </el-form>
 
     <!-- 分类快捷管理 -->
@@ -71,7 +76,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import {
@@ -83,6 +88,7 @@ import {
 } from '@/api/products';
 import { createCategory, deleteCategory, listCategories, updateCategory, type Category } from '@/api/categories';
 import { yuanToFen } from '@/utils/money';
+import ImagePicker from '@/components/ImagePicker.vue';
 
 interface SkuForm {
   /** 编辑模式既有 SKU 的数据库 id：无 id 视为新增 */
@@ -110,12 +116,22 @@ const form = reactive({
   description: '',
   skus: [] as SkuForm[],
 });
-const imagesText = ref('');
+
+/** 封面图在表单里是单个字符串，选择器统一吃数组，这里做一层适配 */
+const coverList = computed<string[]>({
+  get: () => (form.coverImage ? [form.coverImage] : []),
+  set: (v) => {
+    form.coverImage = v[0] ?? '';
+  },
+});
+
+/** 详情图：接口里存的是 JSON 字符串，这里始终是数组 */
+const detailImages = ref<string[]>([]);
 
 const rules: FormRules = {
   name: [{ required: true, message: '请输入商品名称', trigger: 'blur' }],
   categoryId: [{ required: true, message: '请选择分类', trigger: 'change' }],
-  coverImage: [{ required: true, message: '请输入封面图 URL', trigger: 'blur' }],
+  coverImage: [{ required: true, message: '请上传封面图', trigger: 'change' }],
 };
 
 function addSku() {
@@ -156,7 +172,7 @@ async function loadDetail() {
     form.coverImage = p.coverImage;
     form.description = p.description ?? '';
     form.skus = skuToForm(p.skus);
-    imagesText.value = parseImages(p.images).join('\n');
+    detailImages.value = parseImages(p.images);
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '加载失败');
     routerBack();
@@ -176,7 +192,7 @@ function buildPayload() {
       stock: s.stock,
     }));
   if (!skus.length) throw new Error('至少需要一个规格 SKU');
-  const images = imagesText.value.split('\n').map((s) => s.trim()).filter(Boolean);
+  const images = detailImages.value.map((s) => s.trim()).filter(Boolean);
   return {
     categoryId: form.categoryId!,
     name: form.name.trim(),
@@ -291,6 +307,17 @@ onMounted(async () => {
 .sku-stock {
   width: 120px;
 }
+.sku-field {
+  display: flex;
+  align-items: center;
+}
+.sku-field .el-input-number {
+  width: 100%;
+}
+/* 桌面端标签由 placeholder 承担，只在手机上显示 */
+.sku-flabel {
+  display: none;
+}
 .cat-item {
   display: flex;
   gap: 8px;
@@ -301,5 +328,69 @@ onMounted(async () => {
   display: flex;
   gap: 8px;
   margin-top: 12px;
+}
+.submit-bar {
+  display: flex;
+  gap: 8px;
+}
+
+/* ─────────── 手机：规格行改成「规格名独占一行，价格/库存并排」 ─────────── */
+@media (max-width: 900px) {
+  .sku-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    grid-template-areas:
+      'spec spec spec'
+      'price stock del';
+    gap: 8px 10px;
+    padding: 10px;
+    margin-bottom: 10px;
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-1);
+    background: var(--ink-820);
+  }
+  .sku-spec {
+    grid-area: spec;
+    width: 100%;
+  }
+  .sku-price {
+    grid-area: price;
+    width: 100%;
+  }
+  .sku-stock {
+    grid-area: stock;
+    width: 100%;
+  }
+  .sku-field {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+  .sku-flabel {
+    display: block;
+    font-size: 11px;
+    color: var(--text-lo);
+  }
+  .sku-del {
+    grid-area: del;
+    align-self: end;
+  }
+  .sku-add {
+    width: 100%;
+    height: 40px;
+  }
+  /* 保存条吸底：表单长，划到一半也能直接保存 */
+  .submit-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    padding: 10px 0 calc(10px + env(safe-area-inset-bottom));
+    margin-top: 4px;
+    background: linear-gradient(180deg, transparent, var(--ink-900) 22%);
+  }
+  .submit-bar .el-button {
+    flex: 1;
+    margin-left: 0;
+  }
 }
 </style>

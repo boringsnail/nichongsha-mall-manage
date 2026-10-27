@@ -7,7 +7,34 @@
       </div>
     </template>
 
-    <el-table v-loading="loading" :data="rows" border stripe>
+    <!-- 手机：4 列表格只剩一条缝，改成「分类名 + 操作」的列表行 -->
+    <div v-if="isMobile" v-loading="loading" class="c-list">
+      <div v-for="row in rows" :key="row.id" class="c-row">
+        <span class="c-idx mono">{{ row.sortOrder }}</span>
+        <div class="c-body">
+          <el-input
+            v-if="editingId === row.id"
+            v-model="editingName"
+            size="small"
+            @keyup.enter="save(row)"
+          />
+          <span v-else class="c-name">{{ row.name }}</span>
+        </div>
+        <div class="c-acts">
+          <template v-if="editingId === row.id">
+            <el-button link type="primary" @click="save(row)">保存</el-button>
+            <el-button link @click="editingId = null">取消</el-button>
+          </template>
+          <template v-else>
+            <el-button link type="primary" @click="startEdit(row)">重命名</el-button>
+            <el-button link type="danger" @click="remove(row)">删除</el-button>
+          </template>
+        </div>
+      </div>
+      <div v-if="!loading && !rows.length" class="c-empty">还没有分类</div>
+    </div>
+
+    <el-table v-else v-loading="loading" :data="rows" border stripe>
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column label="分类名">
         <template #default="{ row }">
@@ -44,6 +71,9 @@
 import { onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { createCategory, deleteCategory, listCategories, updateCategory, type Category } from '@/api/categories';
+import { useIsMobile } from '@/composables/useIsMobile';
+
+const { isMobile } = useIsMobile();
 
 const loading = ref(false);
 const rows = ref<Category[]>([]);
@@ -128,5 +158,48 @@ onMounted(load);
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+/* ─────────── 手机列表 ─────────── */
+.c-list {
+  display: flex;
+  flex-direction: column;
+}
+.c-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--line-1);
+}
+.c-row:last-child {
+  border-bottom: none;
+}
+.c-idx {
+  flex: none;
+  width: 26px;
+  font-size: 10.5px;
+  color: var(--text-lo);
+  text-align: center;
+}
+.c-body {
+  flex: 1;
+  min-width: 0;
+}
+.c-name {
+  font-size: 14px;
+  color: var(--text-hi);
+}
+.c-acts {
+  flex: none;
+  display: flex;
+  gap: 2px;
+}
+.c-empty {
+  padding: 26px 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-lo);
 }
 </style>

@@ -7,7 +7,7 @@
         <div class="brand-mark">宠</div>
         <div>
           <div class="brand-name">你宠啥</div>
-          <div class="label">dispatch console</div>
+          <div class="label">商家调度台</div>
         </div>
       </div>
 
@@ -27,8 +27,8 @@
     <!-- 右侧：登录表单 -->
     <div class="form-side panel">
       <div class="form-head">
-        <span class="label">authenticate</span>
-        <span class="mono form-code">SIGN IN</span>
+        <span class="label">身份验证</span>
+        <span class="mono form-code">登录</span>
       </div>
 
       <form class="form" @submit.prevent="onSubmit">
@@ -37,7 +37,7 @@
           <el-input
             v-model="form.username"
             size="large"
-            placeholder="merchant account"
+            placeholder="商家账号"
             autocomplete="username"
             clearable
           />

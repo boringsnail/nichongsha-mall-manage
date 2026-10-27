@@ -22,7 +22,7 @@
     <div v-if="isMobile" v-loading="loading" class="p-list">
       <article v-for="row in rows" :key="row.id" class="p-card">
         <div class="p-hd">
-          <el-image v-if="row.coverImage" :src="row.coverImage" fit="cover" class="p-cover" />
+          <img v-if="row.coverImage" :src="mediaSrc(row.coverImage)" class="p-cover" :alt="row.name" />
           <div v-else class="p-cover ph">无图</div>
           <div class="p-info">
             <div class="p-name">{{ row.name }}</div>
@@ -49,7 +49,8 @@
       <el-table-column label="商品" min-width="300">
         <template #default="{ row }">
           <div class="prod-cell">
-            <el-image :src="row.coverImage" fit="cover" class="cover" :preview-src-list="[row.coverImage]" />
+            <img v-if="row.coverImage" :src="mediaSrc(row.coverImage)" class="cover" :alt="row.name" />
+            <div v-else class="cover ph">无图</div>
             <div>
               <div class="name">{{ row.name }}</div>
               <div v-if="row.subtitle" class="subtitle">{{ row.subtitle }}</div>
@@ -102,6 +103,7 @@ import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useIsMobile } from '@/composables/useIsMobile';
+import { mediaSrc } from '@/api/media';
 import { adminDeleteProduct, adminListProducts, adminSetProductStatus, type ProductRow } from '@/api/products';
 import { fenToYuan } from '@/utils/money';
 

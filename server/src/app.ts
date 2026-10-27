@@ -21,6 +21,7 @@ import { adminUsersRouter } from './routes/adminUsers.js';
 import { afterSalesRouter } from './routes/afterSales.js';
 import { adminStatsRouter } from './routes/adminStats.js';
 import { adminVisitsRouter } from './routes/adminVisits.js';
+import { adminMediaRouter, mediaRouter } from './routes/media.js';
 import { productsRouter, categoriesRouter } from './routes/products.js';
 import { trackRouter } from './routes/track.js';
 import { payRouter } from './routes/pay.js';
@@ -57,10 +58,11 @@ export function createApp() {
     }),
   );
   // 商品批量导入可能一次带上千行 JSON，默认 100kb 不够；
+  // 图片上传走 base64（1.5MB 原图 ≈ 2MB 请求体），所以放到 3mb；
   // 同时保留原始报文体：微信支付 APIv3 回调验签必须用未经重新序列化的原始 body。
   app.use(
     express.json({
-      limit: '2mb',
+      limit: '3mb',
       verify: (req, _res, buf) => {
         (req as unknown as { rawBody?: string }).rawBody = buf.toString('utf8');
       },
@@ -91,6 +93,8 @@ export function createApp() {
   app.use('/api/categories', categoriesRouter);
   app.use('/api/products', productsRouter);
   app.use('/api/announcement', announcementRouter);
+  // 商品图片：读图公开（<img> 带不了 token），上传要商家登录
+  app.use('/api/media', mediaRouter);
   app.use('/api/admin/auth', adminAuthRouter);
   app.use('/api/admin/categories', requireAuth('merchant'), adminCategoriesRouter);
   app.use('/api/admin/products', requireAuth('merchant'), adminProductsRouter);
@@ -102,6 +106,7 @@ export function createApp() {
   app.use('/api/admin/users', requireAuth('merchant'), adminUsersRouter);
   app.use('/api/admin/stats', requireAuth('merchant'), adminStatsRouter);
   app.use('/api/admin/visits', requireAuth('merchant'), adminVisitsRouter);
+  app.use('/api/admin/media', requireAuth('merchant'), adminMediaRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

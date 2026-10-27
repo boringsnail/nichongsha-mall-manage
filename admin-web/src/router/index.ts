@@ -22,6 +22,8 @@ const router = createRouter({
         { path: 'users', name: 'users', component: () => import('@/views/users/UserList.vue'), meta: { title: '用户管理' } },
         { path: 'visits', name: 'visits', component: () => import('@/views/Visits.vue'), meta: { title: '用户访问' } },
         { path: 'settings', name: 'settings', component: () => import('@/views/Settings.vue'), meta: { title: '配置管理' } },
+        // 手机底部标签栏的「更多」：桌面端左侧栏已经列全，这里只是手机的第二个入口
+        { path: 'more', name: 'more', component: () => import('@/views/More.vue'), meta: { title: '全部功能' } },
       ],
     },
   ],

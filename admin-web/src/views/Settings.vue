@@ -460,4 +460,39 @@ onMounted(load);
     grid-template-columns: minmax(0, 1fr);
   }
 }
+/* ─────────── 手机：公告 + 预览从左右并排改上下，只读数据 3 列改 2 列 ─────────── */
+@media (max-width: 900px) {
+  .page {
+    gap: 10px;
+  }
+  .page-hd {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .page-hd .label {
+    margin-left: 0;
+    width: 100%;
+  }
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* 预览用的手机模型在手机上没意义（屏幕本身就是手机），直接收起来 */
+  .grid > aside {
+    display: none;
+  }
+  .readonly {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .actions {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .actions .el-button {
+    flex: 1;
+    margin-left: 0;
+  }
+  .hours {
+    gap: 8px;
+  }
+}
 </style>

@@ -146,6 +146,23 @@ model User {
 /// 以前只在 JWT 里签发会话，登录这件事本身不留痕，商家问「这个用户多久来一次」
 /// 完全答不上来。这里只记「谁、什么时候、从哪、什么设备」，不记密码/凭证。
 /// userId 允许为空（用户被删后历史记录仍保留，onDelete: SetNull）。
+/// 商品图片素材：商家后台上传后由 /api/media/:id 直接回图，前端不再需要手填 URL。
+/// 存 LONGBLOB 而非对象存储：云托管容器无状态、本地盘重启即丢，而商品图体量很小。
+/// sha256 唯一索引做去重，同一张图重复上传复用同一条记录。
+model MediaAsset {
+  id        Int      @id @default(autoincrement())
+  mime      String   @db.VarChar(64)
+  byteSize  Int
+  width     Int      @default(0)
+  height    Int      @default(0)
+  sha256    String   @unique @db.VarChar(64)
+  data      Bytes    @db.LongBlob
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("MediaAsset")
+}
+
 model LoginLog {
   id        Int      @id @default(autoincrement())
   userId    Int?

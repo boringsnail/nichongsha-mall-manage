@@ -1,23 +1,19 @@
 <template>
   <div class="shell">
-    <!-- 手机上侧栏是抽屉：点遮罩或选中菜单后自动收起 -->
-    <div v-if="navOpen" class="scrim" @click="navOpen = false" />
-
-    <!-- ───────────────── 左侧调度栏 ───────────────── -->
-    <aside class="rail" :class="{ open: navOpen }">
+    <!-- ───────────────── 左侧调度栏（仅桌面；手机上换底部标签栏） ───────────────── -->
+    <aside class="rail">
       <div class="brand">
         <div class="brand-mark">宠</div>
         <div class="brand-text">
           <div class="brand-name">你宠啥</div>
-          <div class="label">dispatch console</div>
+          <div class="label">商家调度台</div>
         </div>
-        <button class="rail-close" type="button" aria-label="收起菜单" @click="navOpen = false">×</button>
       </div>
 
       <nav class="nav">
         <template v-for="group in NAV" :key="group.title">
+          <!-- 分组头只写名字：菜单项已经有 01~10 的编号，再放一组数字会看串 -->
           <div class="nav-group">
-            <span class="label">{{ group.code }}</span>
             <span class="nav-group-name">{{ group.title }}</span>
           </div>
           <router-link
@@ -39,7 +35,7 @@
           <span class="dot-live" :class="{ 'dot-dead': !store.connected }" />
           <span class="mono">{{ store.connected ? '服务在线' : '连接中断' }}</span>
         </div>
-        <div class="label">prod · 微信云托管</div>
+        <div class="label">线上 · 微信云托管</div>
       </div>
     </aside>
 
@@ -47,14 +43,7 @@
     <div class="stage">
       <header class="topbar">
         <div class="topbar-left">
-          <button class="nav-toggle" type="button" aria-label="打开菜单" @click="navOpen = true">
-            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-              <g stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-                <path d="M2.4 4h11.2M2.4 8h11.2M2.4 12h11.2" />
-              </g>
-            </svg>
-          </button>
-          <span class="label">ops</span>
+          <span class="label topbar-ops">运营</span>
           <span class="slash">/</span>
           <span class="page-title">{{ pageTitle }}</span>
         </div>
@@ -87,7 +76,7 @@
 
             <div class="pop">
               <div class="pop-head">
-                <span class="label">alert center</span>
+                <span class="label">提醒中心</span>
                 <span class="mono pop-time">{{ lastCheckText }}</span>
               </div>
 
@@ -173,12 +162,31 @@
       </main>
     </div>
 
+    <!-- 手机底部标签栏：App 里最常用的四个动作 + 更多，比抽屉少一次点击 -->
+    <nav class="tabbar">
+      <router-link
+        v-for="t in TABS"
+        :key="t.path"
+        :to="t.path"
+        class="tab"
+        :class="{ active: tabActive(t) }"
+      >
+        <span class="tab-ico">
+          <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
+            <path :d="t.icon" fill="currentColor" />
+          </svg>
+          <span v-if="tabBadge(t)" class="tab-badge mono">{{ tabBadge(t) }}</span>
+        </span>
+        <span class="tab-text">{{ t.label }}</span>
+      </router-link>
+    </nav>
+
     <AlertCenter />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '@/stores/auth';
@@ -201,7 +209,6 @@ interface NavItem {
   tone?: 'signal' | 'amber';
 }
 interface NavGroup {
-  code: string;
   title: string;
   items: NavItem[];
 }
@@ -209,7 +216,6 @@ interface NavGroup {
 /** 导航分三组：先干活（订单/售后），再维护（商品），最后看人（客户） */
 const NAV: NavGroup[] = [
   {
-    code: '01 / ops',
     title: '运营',
     items: [
       { idx: '01', path: '/dashboard', label: '营业大盘' },
@@ -218,7 +224,6 @@ const NAV: NavGroup[] = [
     ],
   },
   {
-    code: '02 / catalog',
     title: '商品',
     items: [
       { idx: '04', path: '/products', label: '商品管理' },
@@ -228,7 +233,6 @@ const NAV: NavGroup[] = [
     ],
   },
   {
-    code: '03 / crm',
     title: '客户',
     items: [
       { idx: '08', path: '/users', label: '用户管理' },
@@ -236,7 +240,6 @@ const NAV: NavGroup[] = [
     ],
   },
   {
-    code: '04 / system',
     title: '设置',
     items: [{ idx: '10', path: '/settings', label: '配置管理' }],
   },
@@ -245,14 +248,66 @@ const NAV: NavGroup[] = [
 const pageTitle = computed(() => (route.meta.title as string) || '');
 const merchantName = computed(() => auth.merchant?.nickname || auth.merchant?.username || '');
 
-// 手机端抽屉：路由一变就收起，否则点完菜单抽屉还盖在内容上
-const navOpen = ref(false);
-watch(
-  () => route.fullPath,
-  () => {
-    navOpen.value = false;
+/**
+ * 手机底部标签栏。
+ *
+ * 为什么不用抽屉：抽屉是「网页侧边栏收起来」的做法，还要先点汉堡再点菜单，
+ * 在手机上等于两次点击才到得了页面。底部标签栏是 App 的通行形态，
+ * 四个最常用的动作常驻可见，其余收进「更多」。
+ */
+interface NavTab {
+  path: string;
+  label: string;
+  /** 20×20 viewBox 的实心图标路径 */
+  icon: string;
+  badge?: 'ship' | 'sale';
+}
+
+const TABS: NavTab[] = [
+  {
+    path: '/dashboard',
+    label: '大盘',
+    icon: 'M3 16.6h14v1.5H3zM4.7 9.2h2.3v6.3H4.7zM8.9 4.4h2.3v11.1H8.9zM13.1 11.4h2.3v4.1h-2.3z',
   },
-);
+  {
+    path: '/orders',
+    label: '订单',
+    icon: 'M6.2 2.6h7.6A1.6 1.6 0 0 1 15.4 4.2v13.2L10 14.6l-5.4 2.8V4.2a1.6 1.6 0 0 1 1.6-1.6Zm.9 3.3v1.4h5.8V5.9H7.1Zm0 3.2v1.4h4.2V9.1H7.1Z',
+    badge: 'ship',
+  },
+  {
+    path: '/products',
+    label: '商品',
+    icon: 'M10 2 3.2 5.5v9L10 18l6.8-3.5v-9L10 2Zm0 2.4 4.4 2.3L10 9 5.6 6.7 10 4.4Z',
+  },
+  {
+    path: '/after-sales',
+    label: '售后',
+    icon: 'M10 3.2a6.8 6.8 0 0 0-6 3.6V4.4H2.5v5.2h5.2V8.1H5.6A5.3 5.3 0 0 1 10 4.7 5.3 5.3 0 0 1 15.3 10h1.5A6.8 6.8 0 0 0 10 3.2Zm0 13.6a6.8 6.8 0 0 0 6-3.6v2.4h1.5v-5.2h-5.2v1.5h2.1a5.3 5.3 0 0 1-4.4 2.4 5.3 5.3 0 0 1-5.3-5.3H3.2a6.8 6.8 0 0 0 6.8 6.8Z',
+    badge: 'sale',
+  },
+  {
+    path: '/more',
+    label: '更多',
+    icon: 'M3.6 3.6h5v5h-5zm7.8 0h5v5h-5zM3.6 11.4h5v5h-5zm7.8 0h5v5h-5z',
+  },
+];
+
+function matchPath(path: string): boolean {
+  return route.path === path || route.path.startsWith(`${path}/`);
+}
+
+/** 「更多」在其它四个都不匹配时高亮，避免底部出现「什么都没选中」的空态 */
+function tabActive(t: NavTab): boolean {
+  if (t.path === '/more') return !TABS.some((x) => x.path !== '/more' && matchPath(x.path));
+  return matchPath(t.path);
+}
+
+function tabBadge(t: NavTab): number {
+  if (t.badge === 'ship') return store.pendingShipCount;
+  if (t.badge === 'sale') return store.pendingAfterSaleCount;
+  return 0;
+}
 
 function isActive(path: string): boolean {
   if (path === '/products') return route.path === '/products' || route.path.startsWith('/products/');
@@ -711,39 +766,10 @@ onBeforeUnmount(() => {
   color: var(--text-lo);
 }
 
-/* ───────────────── 手机端：侧栏变抽屉 ───────────────── */
-/* 触发按钮与关闭按钮只在窄屏出现，桌面端完全不影响原有排布 */
-.nav-toggle,
-.rail-close {
+/* ───────────────── 手机端：底部标签栏 ───────────────── */
+/* 标签栏只在窄屏出现；桌面端保持左侧常驻侧栏 */
+.tabbar {
   display: none;
-}
-.nav-toggle {
-  width: 30px;
-  height: 30px;
-  margin-right: 2px;
-  flex: none;
-  place-items: center;
-  background: transparent;
-  border: 1px solid var(--line-1);
-  border-radius: var(--r-1);
-  color: var(--text-mid);
-  cursor: pointer;
-}
-.nav-toggle:active {
-  background: var(--hover);
-  color: var(--text-hi);
-}
-.scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  background: rgb(0 0 0 / 0.45);
-  animation: scrim-in var(--dur-2, 180ms) ease;
-}
-@keyframes scrim-in {
-  from {
-    opacity: 0;
-  }
 }
 
 @media (max-width: 900px) {
@@ -751,51 +777,13 @@ onBeforeUnmount(() => {
   .shell {
     height: 100dvh;
   }
-  .nav-toggle {
-    display: grid;
-  }
+  /* 手机上不再有侧栏：导航全部走底部标签栏 + 「更多」页 */
   .rail {
-    position: fixed;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 50;
-    width: 264px;
-    max-width: 82vw;
-    transform: translateX(-100%);
-    transition: transform 200ms cubic-bezier(0.32, 0.72, 0, 1);
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
-    box-shadow: 0 0 40px rgb(0 0 0 / 0.35);
-  }
-  .rail.open {
-    transform: none;
-  }
-  .rail-close {
-    display: grid;
-    place-items: center;
-    width: 28px;
-    height: 28px;
-    margin-left: auto;
-    background: transparent;
-    border: 1px solid var(--line-1);
-    border-radius: var(--r-1);
-    color: var(--text-mid);
-    font-size: 16px;
-    line-height: 1;
-    cursor: pointer;
-  }
-  /* 手机上菜单项放大到 44px，手指点得准 */
-  .nav-item {
-    height: 44px;
-    font-size: 14px;
-  }
-  .nav {
-    padding-bottom: 24px;
+    display: none;
   }
   .topbar {
     height: 48px;
-    padding: 0 10px;
+    padding: 0 12px;
     padding-top: env(safe-area-inset-top);
     gap: 8px;
   }
@@ -803,13 +791,15 @@ onBeforeUnmount(() => {
     gap: 6px;
   }
   .main {
-    padding: 10px 10px calc(14px + env(safe-area-inset-bottom));
+    /* 底部要给标签栏让位，否则最后一屏内容会被挡住 */
+    padding: 10px 10px calc(64px + env(safe-area-inset-bottom));
     -webkit-overflow-scrolling: touch;
   }
-  /* 手机顶栏只留「菜单 / 标题 / 提醒 / 头像」，时钟与主题色块先让位 */
+  /* 手机顶栏只留「标题 / 提醒 / 主题 / 头像」，前缀与时钟先让位 */
   .clock,
   .divider,
-  .slash {
+  .slash,
+  .topbar-ops {
     display: none;
   }
   .topbar-right {
@@ -829,6 +819,70 @@ onBeforeUnmount(() => {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  .tabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 60;
+    display: flex;
+    align-items: stretch;
+    height: calc(56px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--ink-880);
+    border-top: 1px solid var(--line-1);
+    /* 顶边一道极淡的投影，滚动时和内容分得开 */
+    box-shadow: 0 -6px 18px -12px rgb(0 0 0 / 0.5);
+  }
+  .tab {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    text-decoration: none;
+    color: var(--text-lo);
+    /* 44px 是手指能稳稳点中的最小高度，这里 56 更宽裕 */
+    -webkit-tap-highlight-color: transparent;
+    transition: color var(--dur-1) var(--ease);
+  }
+  .tab:active {
+    background: var(--hover);
+  }
+  .tab.active {
+    color: var(--signal);
+  }
+  .tab-ico {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+  }
+  .tab-text {
+    font-size: 10.5px;
+    letter-spacing: 0.02em;
+    line-height: 1;
+  }
+  .tab-badge {
+    position: absolute;
+    top: -4px;
+    right: -8px;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 4px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--r-pill);
+    background: var(--red);
+    color: var(--red-ink);
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+  }
 }
 
 @media (max-width: 420px) {
@@ -837,6 +891,9 @@ onBeforeUnmount(() => {
   }
   .page-title {
     font-size: 12.5px;
+  }
+  .tab-text {
+    font-size: 10px;
   }
 }
 </style>

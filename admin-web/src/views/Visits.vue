@@ -3,7 +3,7 @@
     <!-- 工具条：时间窗只作用于「浏览 / 登录」两条流水，购物车是实时快照 -->
     <div class="bar">
       <div class="bar-left">
-        <span class="label">range</span>
+        <span class="label">时间范围</span>
         <el-radio-group v-model="days" size="small" @change="reloadAll">
           <el-radio-button :value="7">近 7 天</el-radio-button>
           <el-radio-button :value="30">近 30 天</el-radio-button>
@@ -56,7 +56,43 @@
 
       <!-- 浏览记录 -->
       <template v-if="tab === 'views'">
-        <el-table v-loading="views.loading" :data="views.rows" class="tbl" empty-text="该时间窗内还没有浏览记录">
+        <!-- 手机：时间 + 访客 + 商品三列在 390px 下必然横滑，改成一屏一条的卡片 -->
+        <div v-if="isMobile" v-loading="views.loading" class="v-list">
+          <div v-for="row in views.rows" :key="row.id" class="v-card">
+            <div class="v-hd">
+              <span class="mono v-time">{{ formatTime(row.createdAt) }}</span>
+              <el-button
+                v-if="row.user"
+                link
+                type="primary"
+                size="small"
+                @click="focusUser(row.user.id, row.user.nickname || '微信用户')"
+              >
+                只看他
+              </el-button>
+            </div>
+            <div class="v-who">
+              <template v-if="row.user">
+                <span class="v-name">{{ row.user.nickname || '微信用户' }}</span>
+                <span class="muted uid">{{ shortOpenid(row.user.openid) }}</span>
+              </template>
+              <el-tag v-else size="small" type="info">游客</el-tag>
+            </div>
+            <div v-if="row.product" class="v-prod">
+              <img v-if="row.product.coverImage" :src="mediaSrc(row.product.coverImage)" class="cover" alt="" />
+              <div v-else class="cover ph">无图</div>
+              <div class="v-prod-meta">
+                <div class="v-prod-name">{{ row.product.name }}</div>
+                <div class="muted">
+                  ¥{{ fenToYuan(row.product.minPrice) }} 起
+                  <span v-if="row.product.status === 'OFF'" class="off">· 已下架</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-if="!views.loading && !views.rows.length" class="v-empty">该时间窗内还没有浏览记录</div>
+        </div>
+        <el-table v-else v-loading="views.loading" :data="views.rows" class="tbl" empty-text="该时间窗内还没有浏览记录">
           <el-table-column label="时间" width="176" class-name="num-cell">
             <template #default="{ row }"><span class="mono">{{ formatTime(row.createdAt) }}</span></template>
           </el-table-column>
@@ -74,7 +110,7 @@
           <el-table-column label="浏览商品" min-width="300">
             <template #default="{ row }">
               <div v-if="row.product" class="prod-cell">
-                <el-image v-if="row.product.coverImage" :src="row.product.coverImage" fit="cover" class="cover" />
+                <img v-if="row.product.coverImage" :src="mediaSrc(row.product.coverImage)" class="cover" alt="" />
                 <div v-else class="cover ph">无图</div>
                 <div class="prod-meta">
                   <div class="prod-name" :title="row.product.name">{{ row.product.name }}</div>
@@ -114,7 +150,34 @@
 
       <!-- 登录记录 -->
       <template v-else-if="tab === 'logins'">
-        <el-table v-loading="logins.loading" :data="logins.rows" class="tbl" empty-text="该时间窗内还没有登录记录">
+        <div v-if="isMobile" v-loading="logins.loading" class="v-list">
+          <div v-for="row in logins.rows" :key="row.id" class="v-card">
+            <div class="v-hd">
+              <span class="mono v-time">{{ formatTime(row.createdAt) }}</span>
+              <el-button
+                v-if="row.user"
+                link
+                type="primary"
+                size="small"
+                @click="focusUser(row.user.id, row.user.nickname || '微信用户')"
+              >
+                只看他
+              </el-button>
+            </div>
+            <div class="v-who">
+              <span class="v-name">{{ row.user?.nickname || '微信用户' }}</span>
+              <el-tag v-if="row.isNewUser" size="small" type="success">新客</el-tag>
+              <span class="muted uid">{{ shortOpenid(row.openid) }}</span>
+            </div>
+            <div class="v-meta">
+              <span class="v-chip">{{ viaText(row.via) }}</span>
+              <span class="mono">{{ row.ip || '—' }}</span>
+              <span>{{ deviceText(row.userAgent) }}</span>
+            </div>
+          </div>
+          <div v-if="!logins.loading && !logins.rows.length" class="v-empty">该时间窗内还没有登录记录</div>
+        </div>
+        <el-table v-else v-loading="logins.loading" :data="logins.rows" class="tbl" empty-text="该时间窗内还没有登录记录">
           <el-table-column label="时间" width="176" class-name="num-cell">
             <template #default="{ row }"><span class="mono">{{ formatTime(row.createdAt) }}</span></template>
           </el-table-column>
@@ -161,7 +224,36 @@
 
       <!-- 购物车 -->
       <template v-else>
-        <el-table v-loading="carts.loading" :data="carts.rows" class="tbl" empty-text="当前没有待结算的购物车">
+        <div v-if="isMobile" v-loading="carts.loading" class="v-list">
+          <div v-for="row in carts.rows" :key="row.id" class="v-card">
+            <div class="v-hd">
+              <div class="v-who">
+                <span class="v-name">{{ row.user.nickname || '微信用户' }}</span>
+                <span class="muted uid">{{ shortOpenid(row.user.openid) }}</span>
+              </div>
+              <el-tag size="small" :type="row.checked ? 'success' : 'info'" effect="plain">
+                {{ row.checked ? '已勾选' : '未勾选' }}
+              </el-tag>
+            </div>
+            <div class="v-prod">
+              <img v-if="row.product.coverImage" :src="mediaSrc(row.product.coverImage)" class="cover" alt="" />
+              <div v-else class="cover ph">无图</div>
+              <div class="v-prod-meta">
+                <div class="v-prod-name">{{ row.product.name }}</div>
+                <div class="muted">
+                  {{ row.specName }}
+                  <span v-if="row.product.status === 'OFF'" class="off">· 已下架</span>
+                </div>
+              </div>
+            </div>
+            <div class="v-foot">
+              <span class="mono muted">{{ fenToYuan(row.price) }} × {{ row.quantity }}</span>
+              <span class="mono v-sub">{{ fenToYuan(row.subtotal) }} 元</span>
+            </div>
+          </div>
+          <div v-if="!carts.loading && !carts.rows.length" class="v-empty">当前没有待结算的购物车</div>
+        </div>
+        <el-table v-else v-loading="carts.loading" :data="carts.rows" class="tbl" empty-text="当前没有待结算的购物车">
           <el-table-column label="用户" min-width="180">
             <template #default="{ row }">
               <div>{{ row.user.nickname || '微信用户' }}</div>
@@ -171,7 +263,7 @@
           <el-table-column label="商品" min-width="260">
             <template #default="{ row }">
               <div class="prod-cell">
-                <el-image v-if="row.product.coverImage" :src="row.product.coverImage" fit="cover" class="cover" />
+                <img v-if="row.product.coverImage" :src="mediaSrc(row.product.coverImage)" class="cover" alt="" />
                 <div v-else class="cover ph">无图</div>
                 <div class="prod-meta">
                   <div class="prod-name" :title="row.product.name">{{ row.product.name }}</div>
@@ -229,6 +321,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useIsMobile } from '@/composables/useIsMobile';
+import { mediaSrc } from '@/api/media';
 import {
   adminCarts,
   adminLoginLogs,
@@ -719,5 +812,111 @@ onMounted(() => {
     margin: 10px 12px;
     justify-content: center;
   }
+}
+/* ─────────── 手机卡片流（浏览 / 登录 / 购物车共用） ─────────── */
+.v-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  min-height: 120px;
+}
+.v-card {
+  padding: 12px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  background: var(--ink-850);
+}
+.v-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.v-time {
+  font-size: 11.5px;
+  color: var(--text-mid);
+}
+.v-who {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.v-name {
+  font-size: 13.5px;
+  color: var(--text-hi);
+}
+.v-prod {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-1);
+}
+.v-prod .cover {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  object-fit: cover;
+  border-radius: var(--r-1);
+  background: var(--ink-820);
+}
+.v-prod .cover.ph {
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  color: var(--text-lo);
+  border: 1px dashed var(--line-2);
+}
+.v-prod-meta {
+  min-width: 0;
+  flex: 1;
+}
+.v-prod-name {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-hi);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.v-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-lo);
+}
+.v-chip {
+  padding: 1px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  color: var(--text-mid);
+}
+.v-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-1);
+  font-size: 11.5px;
+}
+.v-sub {
+  font-size: 15px;
+  color: var(--text-hi);
+}
+.v-empty {
+  padding: 26px 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-lo);
 }
 </style>

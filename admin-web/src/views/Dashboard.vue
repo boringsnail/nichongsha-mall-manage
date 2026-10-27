@@ -3,7 +3,7 @@
     <!-- 工具条：范围切换 + 数据时点 -->
     <div class="bar">
       <div class="bar-left">
-        <span class="label">range</span>
+        <span class="label">时间范围</span>
         <el-radio-group v-model="days" size="small" @change="load">
           <el-radio-button :value="7">近 7 天</el-radio-button>
           <el-radio-button :value="30">近 30 天</el-radio-button>
@@ -83,7 +83,7 @@
       <section class="panel">
         <div class="panel-hd">
           <span class="rule-title">近 {{ days }} 天经营趋势</span>
-          <span class="label">gmv / net / orders</span>
+          <span class="label">成交额 / 净额 / 订单数</span>
         </div>
         <div class="panel-bd">
           <div ref="trendRef" class="chart" />
@@ -93,7 +93,7 @@
       <section class="panel">
         <div class="panel-hd">
           <span class="rule-title">转化漏斗</span>
-          <span class="label">session</span>
+          <span class="label">会话</span>
         </div>
         <div class="panel-bd">
           <div ref="funnelRef" class="chart" />
@@ -109,7 +109,7 @@
     <section class="panel">
       <div class="panel-hd">
         <span class="rule-title">经营建议</span>
-        <span class="label">{{ advice.length }} items</span>
+        <span class="label">{{ advice.length }} 条</span>
       </div>
       <div class="panel-bd advice-bd">
         <div v-if="advice.length === 0" class="empty">各项指标均在健康区间，暂无建议</div>
@@ -153,7 +153,7 @@
         <div class="panel-hd">
           <span class="rule-title">低库存预警</span>
           <!-- 真实店铺常有几百个 0 库存 SKU，这里只报数量，明细去库存管理看 -->
-          <span class="label">{{ lowStock.length }} sku · stock ≤ 10</span>
+          <span class="label">{{ lowStock.length }} 个规格 · 库存 ≤ 10</span>
         </div>
         <div class="panel-bd lowstock-bd">
           <div v-if="lowStock.length === 0" class="empty">暂无低库存商品</div>
@@ -207,7 +207,7 @@
 
         <div class="search-cols">
           <div class="kw-col">
-            <div class="kw-hd"><span class="label">热搜词</span><span class="label">times</span></div>
+            <div class="kw-hd"><span class="label">热搜词</span><span class="label">次数</span></div>
             <div v-if="!searchStats?.topKeywords.length" class="empty">暂无搜索记录</div>
             <div v-for="k in searchStats?.topKeywords ?? []" :key="k.keyword" class="kw-row">
               <span class="kw-text" :title="k.keyword">{{ k.keyword }}</span>
@@ -216,7 +216,7 @@
             </div>
           </div>
           <div class="kw-col">
-            <div class="kw-hd"><span class="label">搜了没结果</span><span class="label">times</span></div>
+            <div class="kw-hd"><span class="label">搜了没结果</span><span class="label">次数</span></div>
             <div v-if="!searchStats?.zeroKeywords.length" class="empty">没有无结果的关键词</div>
             <div v-for="k in searchStats?.zeroKeywords ?? []" :key="k.keyword" class="kw-row zero">
               <span class="kw-text" :title="k.keyword">{{ k.keyword }}</span>
@@ -231,19 +231,23 @@
           <span class="label">最近 {{ searchStats?.users.length ?? 0 }} 人</span>
         </div>
         <el-table :data="searchStats?.users ?? []" size="small" empty-text="暂无用户搜索记录">
-          <el-table-column label="用户" min-width="200">
+          <el-table-column label="用户" :min-width="isMobile ? 150 : 200">
             <template #default="{ row }">
               <div>{{ row.nickname || '微信用户' }}</div>
-              <div class="muted uid" :title="row.openid">{{ row.openid }}</div>
+              <!-- 手机上「最近搜索 / 最近时间」两列放不下，压成一行塞进用户格 -->
+              <div v-if="isMobile" class="muted uid">
+                {{ row.lastKeyword }} · {{ formatTime(row.lastAt) }}
+              </div>
+              <div v-else class="muted uid" :title="row.openid">{{ row.openid }}</div>
             </template>
           </el-table-column>
           <el-table-column label="搜索次数" width="96" align="right">
             <template #default="{ row }"><span class="mono">{{ row.count }}</span></template>
           </el-table-column>
-          <el-table-column label="最近搜索" min-width="150">
+          <el-table-column v-if="!isMobile" label="最近搜索" min-width="150">
             <template #default="{ row }"><span class="kw-last">{{ row.lastKeyword }}</span></template>
           </el-table-column>
-          <el-table-column label="最近时间" width="176">
+          <el-table-column v-if="!isMobile" label="最近时间" width="176">
             <template #default="{ row }"><span class="mono muted">{{ formatTime(row.lastAt) }}</span></template>
           </el-table-column>
           <el-table-column label="操作" width="92" :fixed="isMobile ? false : 'right'">
@@ -261,7 +265,7 @@
         <template v-if="prodTrend">
           <div class="prod-hd">
             <!-- 没配封面图时 el-image 会渲染「加载失败」并把 56px 的框撑破，这里自己兜一个占位 -->
-            <el-image v-if="prodTrend.coverImage" :src="prodTrend.coverImage" fit="cover" class="prod-cover" />
+            <img v-if="prodTrend.coverImage" :src="mediaSrc(prodTrend.coverImage)" class="prod-cover" :alt="prodTrend.name" />
             <div v-else class="prod-cover ph">无图</div>
             <div>
               <div class="prod-name">{{ prodTrend.name }}</div>
@@ -279,7 +283,7 @@
               <div class="sk-num">{{ prodTrend.totalSales }}</div>
             </div>
             <div class="pk">
-              <div class="label">窗口 GMV</div>
+              <div class="label">窗口成交额</div>
               <div class="sk-num">{{ fenToYuan(prodTrend.totalGmv) }}</div>
             </div>
             <div class="pk">
@@ -297,11 +301,11 @@
               <el-radio-button :value="90">90 天</el-radio-button>
               <el-radio-button :value="365">1 年</el-radio-button>
             </el-radio-group>
-            <span class="label">sales / gmv</span>
+            <span class="label">销量 / 成交额</span>
           </div>
           <div ref="prodChartRef" class="chart chart-md" />
           <div class="prod-note">
-            折线为每日销量，柱为每日 GMV；空白天没有成交。点 TOP 榜里的其他柱子可切换商品。
+            折线为每日销量，柱为每日成交额；空白天没有成交。点 TOP 榜里的其他柱子可切换商品。
           </div>
         </template>
       </div>
@@ -340,6 +344,7 @@ import { CanvasRenderer } from 'echarts/renderers';
 import type { ECharts } from 'echarts/core';
 import { ElMessage } from 'element-plus';
 import { useIsMobile } from '@/composables/useIsMobile';
+import { mediaSrc } from '@/api/media';
 import {
   adminAdvice,
   adminFunnel,
@@ -474,10 +479,10 @@ const statCards = computed(() => {
   const ship = o?.toShip ?? 0;
   const low = o?.lowStockCount ?? 0;
   return [
-    { label: '今日 GMV', value: o ? fenToYuan(o.today.gmv) : '—', unit: '元', tone: '' },
+    { label: '今日成交额', value: o ? fenToYuan(o.today.gmv) : '—', unit: '元', tone: '' },
     { label: '今日销量', value: o?.today.salesCount ?? '—', unit: '件', tone: '' },
     { label: '今日订单', value: o?.today.orderCount ?? '—', unit: '单', tone: '' },
-    { label: `近 ${days.value} 天 GMV`, value: o ? fenToYuan(o.week.gmv) : '—', unit: '元', tone: '' },
+    { label: `近 ${days.value} 天成交额`, value: o ? fenToYuan(o.week.gmv) : '—', unit: '元', tone: '' },
     // 待发货与低库存是「要动手」的指标，用琥珀色跳出来
     { label: '待发货', value: o?.toShip ?? '—', unit: '单', tone: ship > 0 ? 'warn' : '' },
     { label: '低库存', value: o?.lowStockCount ?? '—', unit: 'SKU', tone: low > 0 ? 'crit' : '' },
@@ -503,19 +508,21 @@ function renderTrend(points: TrendPoint[]) {
   if (!trendChart) trendChart = echarts.init(trendRef.value);
   const p = readPalette();
   const axis = axisCommon(p);
+  // 手机上左右各 52px 的留白会把绘图区压到 200px 出头，双 Y 轴标签直接叠在一起
+  const mob = isMobile.value;
   trendChart.setOption(
     {
       tooltip: { trigger: 'axis', ...tooltipStyle(p), axisPointer: { lineStyle: { color: p.axis } } },
       legend: {
-        data: ['GMV', '净额', '订单数'],
-        right: 0,
+        data: ['成交额', '净额', '订单数'],
+        ...(mob ? { left: 'center' } : { right: 0 }),
         top: 0,
         itemWidth: 10,
         itemHeight: 2,
-        itemGap: 16,
+        itemGap: mob ? 10 : 16,
         textStyle: { color: p.textMid, fontSize: 10, fontFamily: MONO },
       },
-      grid: { left: 52, right: 52, top: 44, bottom: 28 },
+      grid: mob ? { left: 38, right: 32, top: 42, bottom: 24 } : { left: 52, right: 52, top: 44, bottom: 28 },
       xAxis: {
         type: 'category',
         data: points.map((pt) => pt.date.slice(5)),
@@ -525,7 +532,7 @@ function renderTrend(points: TrendPoint[]) {
       yAxis: [
         {
           type: 'value',
-          name: 'GMV',
+          name: '元',
           nameTextStyle: { color: p.axisLabel, fontSize: 10, fontFamily: MONO, align: 'right' },
           ...axis,
           splitLine: { lineStyle: { color: p.gridLine, type: 'dashed' } },
@@ -536,7 +543,7 @@ function renderTrend(points: TrendPoint[]) {
         },
         {
           type: 'value',
-          name: '订单',
+          name: '单',
           nameTextStyle: { color: p.axisLabel, fontSize: 10, fontFamily: MONO },
           ...axis,
           minInterval: 1,
@@ -545,7 +552,7 @@ function renderTrend(points: TrendPoint[]) {
       ],
       series: [
         {
-          name: 'GMV',
+          name: '成交额',
           type: 'line',
           smooth: true,
           symbol: 'circle',
@@ -567,13 +574,13 @@ function renderTrend(points: TrendPoint[]) {
           yAxisIndex: 1,
           data: points.map((pt) => pt.orderCount),
           barMaxWidth: 10,
-          // 次要序列用低饱和琥珀，避免抢走 GMV 主线的视觉重量；
+          // 次要序列用低饱和琥珀，避免抢走成交额主线的视觉重量；
           // 掺白/掺面板只到 28%，再淡就低于 3:1 看不清了
           itemStyle: { color: mix(p.amber, p.panel, 0.28) },
         },
         {
-          // 净额永远在 GMV 之下，用蓝色虚线叠在上面不会互相遮；
-          // 不画面积，避免和 GMV 的渐变糊成一片
+          // 净额永远在成交额之下，用蓝色虚线叠在上面不会互相遮；
+          // 不画面积，避免和成交额的渐变糊成一片
           name: '净额',
           type: 'line',
           smooth: true,
@@ -627,7 +634,7 @@ function renderFunnel(data: FunnelData | null) {
             show: true,
             position: 'inside',
             color: inkOn(ramp[0]),
-            fontSize: 11,
+            fontSize: isMobile.value ? 10 : 11,
             fontFamily: MONO,
             fontWeight: 600,
           },
@@ -682,13 +689,13 @@ function renderTop(products: TopProduct[]) {
           return [
             `${items[0].marker}<b>${pt.name}</b>`,
             `销量：${pt.salesCount} 件`,
-            `GMV：${fenToYuan(pt.gmv)} 元`,
+            `成交额：${fenToYuan(pt.gmv)} 元`,
             `订单：${pt.orderCount} 单`,
             `名次：TOP ${pt.rank}`,
           ].join('<br/>');
         },
       },
-      grid: { left: 44, right: 16, top: 18, bottom: 52 },
+      grid: { left: 34, right: 12, top: 18, bottom: isMobile.value ? 64 : 52 },
       xAxis: {
         type: 'category',
         data: products.map((pt) => pt.name),
@@ -696,8 +703,9 @@ function renderTop(products: TopProduct[]) {
         axisLabel: {
           ...axis.axisLabel,
           interval: products.length > 12 ? 'auto' : 0,
-          rotate: 24,
-          width: 84,
+          // 手机上横向空间只够放 4~5 个字，转 40° 竖着排比截断更好认
+          rotate: isMobile.value ? 40 : 24,
+          width: isMobile.value ? 64 : 84,
           overflow: 'truncate',
         },
       },
@@ -854,13 +862,13 @@ function renderProdTrend(t: ProductTrend) {
           return [
             `<b>${pt.date}</b>`,
             `销量：${pt.salesCount} 件`,
-            `GMV：${fenToYuan(pt.gmv)} 元`,
+            `成交额：${fenToYuan(pt.gmv)} 元`,
             `订单：${pt.orderCount} 单`,
           ].join('<br/>');
         },
       },
       legend: {
-        data: ['销量', 'GMV'],
+        data: ['销量', '成交额'],
         right: 0,
         top: 0,
         itemWidth: 10,
@@ -915,7 +923,7 @@ function renderProdTrend(t: ProductTrend) {
           },
         },
         {
-          name: 'GMV',
+          name: '成交额',
           type: 'bar',
           yAxisIndex: 1,
           data: t.points.map((pt) => Number((pt.gmv / 100).toFixed(2))),
@@ -1583,6 +1591,60 @@ onBeforeUnmount(() => {
 }
 /* ─────────── 手机（≤900px）：一屏放不下并排，全部改上下 ─────────── */
 @media (max-width: 900px) {
+  /* 图表压一档高度：390px 宽的屏上 320px 高的图已经占掉半屏 */
+  .chart {
+    height: 260px;
+  }
+  .chart-sm {
+    height: 250px;
+  }
+  .chart-md {
+    height: 250px;
+  }
+  /* 搜索趋势是「迷你图」，必须写在 .chart 之后才能盖掉 260px：
+     两个类同优先级，后出现的赢 */
+  .chart-xs {
+    height: 110px;
+  }
+  /* 营收算式改竖排：每行「项目 ……… 金额」，比 2×2 更像一张账单，也看得出先后顺序 */
+  .rev-eq {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 0;
+    padding: 2px 12px 6px;
+  }
+  .rev-cell {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0 12px;
+    flex: none;
+    width: 100%;
+    padding: 10px 0;
+    border-bottom: 1px dashed var(--line-1);
+  }
+  .rev-cell .label {
+    grid-column: 1;
+  }
+  .rev-num {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    text-align: right;
+    font-size: 18px;
+  }
+  .rev-sub {
+    grid-column: 1;
+    margin-top: 2px;
+  }
+  .rev-op {
+    display: none;
+  }
+  .rev-cell.net {
+    border-bottom: none;
+  }
+  .rev-meta {
+    gap: 10px 20px;
+  }
   /* 六格读数在手机上 3 列会挤成一团，改 2 列 × 3 行 */
   .kpi-panel {
     grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -2,7 +2,7 @@
   <div>
     <div class="cmdbar">
       <div class="cmd-left">
-        <span class="label">filter</span>
+        <span class="label">筛选</span>
         <el-select v-model="status" placeholder="全部状态" clearable style="width: 150px" @change="onStatusChange">
           <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
         </el-select>
@@ -195,7 +195,8 @@
     <!-- 详情弹窗 -->
     <el-dialog v-model="detailVisible" title="订单详情" width="640px">
       <div v-if="detail" v-loading="detailLoading">
-        <el-descriptions :column="2" border size="small" label-width="88">
+        <!-- 手机上两列会挤成竖条（地址、金额全折行），单列更好读 -->
+        <el-descriptions :column="isMobile ? 1 : 2" border size="small" label-width="88">
           <el-descriptions-item label="订单号">{{ detail.orderNo }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ statusText(detail.status) }}</el-descriptions-item>
           <el-descriptions-item label="用户">{{ detail.user.nickname || detail.user.openid }}</el-descriptions-item>
@@ -203,8 +204,38 @@
           <!-- 营收三件套：顾客付的运费是收入侧（已含在总金额里），配送成本是成本侧，退款要扣掉 -->
           <el-descriptions-item label="运费收入">{{ fenToYuan(detail.freight) }} 元</el-descriptions-item>
           <el-descriptions-item label="配送成本">
-            <span v-if="detail.deliveryCost">{{ fenToYuan(detail.deliveryCost) }} 元</span>
-            <span v-else class="muted">未录入</span>
+            <!-- 详情里直接能录：从大盘「未录配送成本」点进来时，不该再让人回列表找入口 -->
+            <div class="dc-cell">
+              <template v-if="detailCostEditing">
+                <el-input-number
+                  ref="detailCostRef"
+                  v-model="detailCostYuan"
+                  :min="0"
+                  :max="10000"
+                  :precision="2"
+                  :step="1"
+                  size="small"
+                  placeholder="0.00"
+                  controls-position="right"
+                  :disabled="detailCostSaving"
+                  @keyup.enter="commitDetailCost"
+                  @blur="commitDetailCost"
+                />
+              </template>
+              <template v-else>
+                <span v-if="detail.deliveryCost" class="dc-num">{{ fenToYuan(detail.deliveryCost) }} 元</span>
+                <span v-else class="muted">未录入</span>
+                <el-button
+                  v-if="detail.status !== 'CANCELLED'"
+                  link
+                  type="primary"
+                  size="small"
+                  @click="startDetailCost"
+                >
+                  {{ detail.deliveryCost ? '修改' : '录入' }}
+                </el-button>
+              </template>
+            </div>
           </el-descriptions-item>
           <el-descriptions-item label="已退款">{{ fenToYuan(detail.refundedAmount) }} 元</el-descriptions-item>
           <el-descriptions-item label="本单净额">
@@ -212,7 +243,7 @@
           </el-descriptions-item>
           <el-descriptions-item label="收货人">{{ detail.address.receiverName }} {{ detail.address.phone }}</el-descriptions-item>
           <el-descriptions-item label="收货地址">{{ detail.address.province }}{{ detail.address.city }}{{ detail.address.district }}{{ detail.address.detail }}</el-descriptions-item>
-          <el-descriptions-item label="发货方式" :span="2">
+          <el-descriptions-item label="发货方式" :span="isMobile ? 1 : 2">
             <template v-if="!detail.shippedAt">未发货</template>
             <template v-else>
               <el-tag size="small" effect="plain">{{ logisticsTypeText(detail.logisticsType) }}</el-tag>
@@ -223,7 +254,7 @@
               <span v-else class="muted logi-text">无快递单号</span>
             </template>
           </el-descriptions-item>
-          <el-descriptions-item v-if="detail.remark" label="备注" :span="2">{{ detail.remark }}</el-descriptions-item>
+          <el-descriptions-item v-if="detail.remark" label="备注" :span="isMobile ? 1 : 2">{{ detail.remark }}</el-descriptions-item>
         </el-descriptions>
         <div class="net-hint">
           运费收入已含在总金额里；本单净额 = 总金额 {{ fenToYuan(detail.totalAmount) }} − 退款
@@ -231,11 +262,11 @@
           <template v-if="!detail.deliveryCost">（未录入配送成本，录入后会同步到营业大盘）</template>
         </div>
         <el-table :data="detail.items" border size="small" class="item-table">
-          <el-table-column label="商品">
+          <el-table-column label="商品" min-width="180">
             <template #default="{ row }">
               <div class="prod-cell">
                 <!-- 没封面时 el-image 会渲染「加载失败」把 38px 的框撑破 -->
-                <el-image v-if="row.coverImage" :src="row.coverImage" fit="cover" class="cover" />
+                <img v-if="row.coverImage" :src="mediaSrc(row.coverImage)" class="cover" alt="" />
                 <div v-else class="cover ph">无图</div>
                 <div>
                   <div>{{ row.productName }}</div>
@@ -314,6 +345,7 @@ import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { useIsMobile } from '@/composables/useIsMobile';
+import { mediaSrc } from '@/api/media';
 import {
   adminListOrders,
   adminGetOrder,
@@ -645,10 +677,57 @@ const detailVisible = ref(false);
 const detailLoading = ref(false);
 const detail = ref<AdminOrderDetail | null>(null);
 
+/* ---------- 详情弹窗里录配送成本 ----------
+ * 列表里已经有内联录入，但商家常常是「从大盘看到某单没录成本 → 点开详情核对 → 顺手补上」，
+ * 这时再让他关掉弹窗去列表里找那一行，等于白跑一趟。
+ */
+const detailCostEditing = ref(false);
+const detailCostYuan = ref<number | undefined>(undefined);
+const detailCostSaving = ref(false);
+const detailCostRef = ref<{ focus: () => void }>();
+
+function startDetailCost() {
+  detailCostYuan.value = detail.value?.deliveryCost ? detail.value.deliveryCost / 100 : undefined;
+  detailCostEditing.value = true;
+  nextTick(() => detailCostRef.value?.focus());
+}
+
+async function commitDetailCost() {
+  if (!detail.value || !detailCostEditing.value || detailCostSaving.value) return;
+  const yuan = detailCostYuan.value;
+  const d = detail.value;
+  if (yuan === undefined || yuan === null || Number.isNaN(yuan)) {
+    detailCostEditing.value = false;
+    return;
+  }
+  const fen = yuanToFen(yuan);
+  if (fen === d.deliveryCost) {
+    detailCostEditing.value = false;
+    return;
+  }
+  detailCostSaving.value = true;
+  try {
+    const r = await adminSetDeliveryCost(d.orderNo, fen);
+    // 弹窗与列表是两份数据，两边都要改，否则关掉弹窗后行里还是旧值
+    d.deliveryCost = r.deliveryCost;
+    const row = rows.value.find((x) => x.orderNo === d.orderNo);
+    if (row) row.deliveryCost = r.deliveryCost;
+    ElMessage.success(`配送成本已记为 ${fenToYuan(r.deliveryCost)} 元`);
+    detailCostEditing.value = false;
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '保存失败');
+  } finally {
+    detailCostSaving.value = false;
+  }
+}
+
 async function openDetail(orderNo: string) {
   detailVisible.value = true;
   detailLoading.value = true;
   detail.value = null;
+  // 上一单可能停在编辑态，不清掉会让新单直接进编辑框
+  detailCostEditing.value = false;
+  detailCostYuan.value = undefined;
   try {
     detail.value = await adminGetOrder(orderNo);
   } catch (e) {
@@ -920,6 +999,20 @@ onBeforeUnmount(() => {
     animation: none;
   }
 }
+/* 详情里的配送成本：数字 + 录入按钮同一行，点「录入」原地变输入框 */
+.dc-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.dc-cell .el-input-number {
+  width: 128px;
+}
+.dc-num {
+  color: var(--text-hi);
+}
+
 /* ─────────── 手机卡片流 ─────────── */
 .o-list {
   display: flex;
@@ -1023,7 +1116,11 @@ onBeforeUnmount(() => {
   margin-top: 10px;
 }
 .o-acts .el-button {
-  flex: 1;
+  flex: 1 1 0;
   margin-left: 0;
+}
+/* 只有「详情」一个按钮时拉满整行会很怪，收成固定宽度靠左 */
+.o-acts .el-button:only-child {
+  flex: 0 0 104px;
 }
 </style>
