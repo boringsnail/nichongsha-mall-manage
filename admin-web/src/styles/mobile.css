@@ -1,0 +1,231 @@
+/* ============================================================================
+   手机端适配层（窄屏 ≤900px）
+   ----------------------------------------------------------------------------
+   这套后台是桌面优先设计的：侧栏常驻、六格读数、表格列多、弹窗按桌面宽度写死。
+   手机 / 平板竖屏下不改结构，只做「同一套代码换个排法」——功能一行不少，
+   只是把并排的改成上下、把弹窗改成整页、把表格改成可横滑。
+
+   放在最后加载（main.ts 里在 element.css 之后），所以同权重规则天然覆盖
+   Element Plus 的默认值；少数被内联 style 或更高权重钉死的地方才用 !important，
+   每处都写了原因。
+   ========================================================================== */
+
+@media (max-width: 900px) {
+  /* ───────────── 全局手感 ───────────── */
+  html {
+    /* 手机上禁掉横向整页拖动：表格自己的横滑区域不受影响 */
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    font-size: 13px;
+  }
+  /* 手指点得准：所有可点元素不小于 40px 高，图标按钮 36px */
+  .el-button {
+    min-height: 36px;
+    padding: 0 14px;
+  }
+  .el-button.is-link {
+    min-height: 30px;
+    padding: 0 4px;
+  }
+  .el-button--small {
+    min-height: 32px;
+  }
+
+  /* ───────────── 弹窗 → 整页抽屉式 ───────────── */
+  /* EP 把 width 写在 .el-dialog 的内联 style 上，只能 !important 盖 */
+  .el-overlay-dialog {
+    padding: 0 !important;
+  }
+  .el-dialog {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    border-radius: 0 !important;
+  }
+  .el-dialog__header {
+    flex: none;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: calc(12px + env(safe-area-inset-top)) 14px 12px;
+    background: var(--ink-850);
+    border-bottom: 1px solid var(--line-1);
+  }
+  .el-dialog__headerbtn {
+    top: calc(8px + env(safe-area-inset-top));
+    right: 8px;
+    width: 40px;
+    height: 40px;
+  }
+  .el-dialog__body {
+    flex: 1 1 auto;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 14px;
+  }
+  .el-dialog__footer {
+    flex: none;
+    position: sticky;
+    bottom: 0;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    background: var(--ink-850);
+    border-top: 1px solid var(--line-1);
+  }
+
+  /* 右侧抽屉（单品趋势等）同样铺满 */
+  .el-drawer.rtl,
+  .el-drawer.ltr {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  .el-drawer__header {
+    padding: calc(12px + env(safe-area-inset-top)) 14px 10px;
+    margin-bottom: 0;
+    border-bottom: 1px solid var(--line-1);
+  }
+  .el-drawer__body {
+    padding: 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 确认框 / 消息条不能顶到屏幕边 */
+  .el-message-box {
+    width: calc(100vw - 32px) !important;
+    max-width: 420px;
+  }
+  .el-message {
+    min-width: 0;
+    width: calc(100vw - 24px);
+    max-width: 420px;
+  }
+  .el-popper {
+    max-width: 92vw;
+  }
+
+  /* ───────────── 表格：保持横滑，只把密度和字号调顺 ───────────── */
+  .el-table {
+    font-size: 12px;
+  }
+  .el-table .cell {
+    padding: 0 8px;
+    line-height: 1.45;
+  }
+  .el-table th.el-table__cell {
+    padding: 6px 0;
+  }
+  .el-table td.el-table__cell {
+    padding: 7px 0;
+  }
+  /* 表体横滑在触屏上要有惯性 */
+  .el-table__body-wrapper,
+  .el-scrollbar__wrap {
+    -webkit-overflow-scrolling: touch;
+  }
+  /* 右侧固定列会挡住最后几列，加一道投影让人看出「还能滑」 */
+  .el-table__fixed-right::before,
+  .el-table__fixed::before {
+    display: none;
+  }
+  .el-table__fixed-right {
+    box-shadow: -6px 0 10px -6px rgb(0 0 0 / 0.22);
+  }
+
+  /* ───────────── 分页：居中、去掉每页条数下拉（手机上太挤） ───────────── */
+  .el-pagination {
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 6px;
+    padding: 10px 0;
+  }
+  .el-pagination .el-pagination__sizes,
+  .el-pagination .el-pagination__jump {
+    display: none;
+  }
+  /* 手机上不需要 1 2 3 4 … 35 这一排：只留当前页 + 前后翻页 */
+  .el-pagination .el-pager li.number:not(.is-active) {
+    display: none;
+  }
+  .el-pagination .el-pager li.is-active {
+    margin: 0 2px;
+  }
+
+  /* ───────────── 表单：左标签改上下排，否则标签吃掉半屏 ───────────── */
+  .el-form-item {
+    display: block;
+    margin-bottom: 14px;
+  }
+  .el-form-item__label {
+    width: auto !important;
+    display: block;
+    float: none;
+    padding: 0 0 5px !important;
+    justify-content: flex-start !important;
+    text-align: left !important;
+    line-height: 1.4;
+  }
+  .el-form-item__content {
+    margin-left: 0 !important;
+    line-height: 1.5;
+  }
+  .el-form--inline .el-form-item {
+    margin-right: 0;
+    margin-bottom: 12px;
+    width: 100%;
+  }
+  .el-form--inline .el-form-item__content > .el-input,
+  .el-form--inline .el-form-item__content > .el-select {
+    width: 100% !important;
+  }
+  /* 输入框字号 14px：13px 在手机上偏小，且 Android WebView 聚焦时不再缩放 */
+  .el-input__inner,
+  .el-textarea__inner {
+    font-size: 14px;
+  }
+  .el-input__wrapper {
+    min-height: 36px;
+  }
+
+  /* ───────────── 通用面板 ───────────── */
+  .panel-hd {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    padding: 10px 12px;
+  }
+  .panel-bd {
+    padding: 12px;
+  }
+  .pager {
+    padding: 6px 12px 12px;
+  }
+  .toolbar,
+  .cmdbar,
+  .bar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  /* 工具条右侧的「数据截至 / 刷新」在窄屏换行后靠左更整齐 */
+  .cmd-left,
+  .bar-left {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .rule-title {
+    font-size: 12px;
+  }
+}
+
+/* 超窄屏（小屏手机 / 分屏）：再收一档 */
+@media (max-width: 400px) {
+  .el-dialog__body,
+  .el-drawer__body {
+    padding: 12px 10px;
+  }
+  .el-table .cell {
+    padding: 0 6px;
+  }
+}

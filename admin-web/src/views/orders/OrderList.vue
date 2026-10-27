@@ -24,7 +24,90 @@
       </div>
     </div>
 
-    <el-table v-loading="loading" :data="rows" class="order-table" :row-class-name="rowClass">
+    <!-- 手机：8 列在 390px 下只能横滑，且右侧固定列会盖住用户列 → 改卡片流，
+         一张卡把「单号/状态/人/钱/时间/成本」全摊开，动作直接点 -->
+    <div v-if="isMobile" v-loading="loading" class="o-list">
+      <article
+        v-for="row in rows"
+        :key="row.orderNo"
+        class="o-card"
+        :class="{ 'o-flash': flash.has(row.orderNo) }"
+      >
+        <div class="o-hd">
+          <span class="mono o-no">{{ row.orderNo }}</span>
+          <span class="o-tags">
+            <el-tag size="small" :type="statusTag(row.status)">{{ statusText(row.status) }}</el-tag>
+            <el-tag v-if="row.afterSaleStatus" size="small" :type="afterSaleTag(row.afterSaleStatus)">
+              {{ afterSaleText(row.afterSaleStatus) }}
+            </el-tag>
+          </span>
+        </div>
+
+        <div class="o-body">
+          <div class="o-user">
+            <div class="o-name">{{ row.user.nickname || '微信用户' }}</div>
+            <div class="mono o-uid" :title="row.user.openid">{{ row.user.openid }}</div>
+          </div>
+          <div class="o-amt">
+            <span class="o-num mono">{{ fenToYuan(row.totalAmount) }}</span>
+            <span class="o-unit">{{ row.itemCount }} 件</span>
+          </div>
+        </div>
+
+        <div class="o-meta">
+          <span class="mono o-time">{{ formatTime(row.createdAt) }}</span>
+          <span class="o-cost">
+            <span class="label">配送成本</span>
+            <template v-if="editingNo === row.orderNo">
+              <el-input-number
+                v-model="editYuan"
+                :min="0"
+                :max="10000"
+                :precision="2"
+                :step="1"
+                size="small"
+                placeholder="0.00"
+                controls-position="right"
+                :disabled="savingCost === row.orderNo"
+                @keyup.enter="commitCost(row)"
+                @keyup.esc="cancelEditCost"
+                @blur="commitCost(row)"
+              />
+            </template>
+            <button
+              v-else-if="row.status !== 'CANCELLED'"
+              type="button"
+              class="cost-btn"
+              :class="{ empty: !row.deliveryCost }"
+              @click="startEditCost(row)"
+            >
+              {{ row.deliveryCost ? fenToYuan(row.deliveryCost) : '+ 录入' }}
+            </button>
+            <span v-else class="muted">—</span>
+          </span>
+        </div>
+
+        <div class="o-acts">
+          <el-button size="small" @click="openDetail(row.orderNo)">详情</el-button>
+          <el-button v-if="row.status === 'PAID'" size="small" type="primary" @click="openShip(row.orderNo)">
+            发货
+          </el-button>
+          <el-button
+            v-if="row.status === 'PAID' || row.status === 'SHIPPED'"
+            size="small"
+            @click="syncOne(row.orderNo)"
+          >
+            同步
+          </el-button>
+          <el-button v-if="row.afterSaleStatus" size="small" type="danger" plain @click="openAfterSale(row.orderNo)">
+            售后
+          </el-button>
+        </div>
+      </article>
+      <el-empty v-if="!loading && !rows.length" description="没有订单" />
+    </div>
+
+    <el-table v-else v-loading="loading" :data="rows" class="order-table" :row-class-name="rowClass">
       <el-table-column prop="orderNo" label="订单号" width="190" />
       <!-- 用户列用 min-width：宽屏时它吸收剩余宽度，操作列才会贴住右边缘，
            否则表格右侧会空出一条白带（fixed 列没有溢出可贴） -->
@@ -86,7 +169,7 @@
       <el-table-column label="下单时间" width="170" class-name="num-cell">
         <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="200" fixed="right">
+      <el-table-column label="操作" width="200" :fixed="isMobile ? false : 'right'">
         <template #default="{ row }">
           <el-button link type="primary" @click="openDetail(row.orderNo)">详情</el-button>
           <el-button v-if="row.status === 'PAID'" link type="success" @click="openShip(row.orderNo)">发货</el-button>
@@ -230,6 +313,7 @@
 import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
+import { useIsMobile } from '@/composables/useIsMobile';
 import {
   adminListOrders,
   adminGetOrder,
@@ -244,6 +328,7 @@ import {
 } from '@/api/orders';
 import { fenToYuan, yuanToFen } from '@/utils/money';
 
+const { isMobile } = useIsMobile();
 const statusOptions: { label: string; value: OrderStatus }[] = [
   { label: '待支付', value: 'PENDING_PAYMENT' },
   { label: '已支付', value: 'PAID' },
@@ -834,5 +919,111 @@ onBeforeUnmount(() => {
   .order-table :deep(.row-flash > td.el-table__cell) {
     animation: none;
   }
+}
+/* ─────────── 手机卡片流 ─────────── */
+.o-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 120px;
+}
+.o-card {
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  background: var(--ink-850);
+  padding: 12px;
+}
+/* 自动同步刚变更的那一单：左侧信号条 + 淡底，和桌面端的 row-flash 同一套语义 */
+.o-card.o-flash {
+  border-color: var(--signal-border);
+  background: linear-gradient(90deg, var(--signal-flash), transparent 70%);
+  box-shadow: inset 2px 0 0 var(--signal);
+}
+.o-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.o-no {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--text-hi);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.o-tags {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+.o-body {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 9px;
+}
+.o-user {
+  min-width: 0;
+  flex: 1;
+}
+.o-name {
+  font-size: 13.5px;
+  color: var(--text-hi);
+}
+.o-uid {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--text-lo);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.o-amt {
+  flex: none;
+  text-align: right;
+}
+.o-num {
+  font-size: 17px;
+  color: var(--text-hi);
+  line-height: 1.1;
+}
+.o-unit {
+  margin-left: 3px;
+  font-size: 10.5px;
+  color: var(--text-lo);
+}
+.o-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line-1);
+}
+.o-time {
+  font-size: 11px;
+  color: var(--text-lo);
+}
+.o-cost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.o-cost .el-input-number {
+  width: 110px;
+}
+.o-acts {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.o-acts .el-button {
+  flex: 1;
+  margin-left: 0;
 }
 </style>

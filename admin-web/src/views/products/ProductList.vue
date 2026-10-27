@@ -18,7 +18,34 @@
       <el-button @click="goImport">批量导入</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="rows" border stripe>
+    <!-- 手机：表格 6 列在 390px 下必然横滑，改成卡片流，一屏一张、动作直接点 -->
+    <div v-if="isMobile" v-loading="loading" class="p-list">
+      <article v-for="row in rows" :key="row.id" class="p-card">
+        <div class="p-hd">
+          <el-image v-if="row.coverImage" :src="row.coverImage" fit="cover" class="p-cover" />
+          <div v-else class="p-cover ph">无图</div>
+          <div class="p-info">
+            <div class="p-name">{{ row.name }}</div>
+            <div v-if="row.subtitle" class="p-sub">{{ row.subtitle }}</div>
+            <div class="p-meta mono">
+              ¥{{ priceText(row) }} · 库存 {{ totalStock(row) }} · 销 {{ row.salesCount }}
+            </div>
+          </div>
+          <el-tag size="small" :type="row.status === 'ON' ? 'success' : 'info'">
+            {{ row.status === 'ON' ? '上架' : '下架' }}
+          </el-tag>
+        </div>
+        <div class="p-acts">
+          <el-button size="small" @click="goEdit(row.id)">编辑</el-button>
+          <el-button v-if="row.status === 'ON'" size="small" @click="toggle(row, 'OFF')">下架</el-button>
+          <el-button v-else size="small" type="success" plain @click="toggle(row, 'ON')">上架</el-button>
+          <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
+        </div>
+      </article>
+      <el-empty v-if="!loading && !rows.length" description="没有商品" />
+    </div>
+
+    <el-table v-else v-loading="loading" :data="rows" border stripe>
       <el-table-column label="商品" min-width="300">
         <template #default="{ row }">
           <div class="prod-cell">
@@ -49,7 +76,7 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="190" fixed="right">
+      <el-table-column label="操作" width="190" :fixed="isMobile ? false : 'right'">
         <template #default="{ row }">
           <el-button link type="primary" @click="goEdit(row.id)">编辑</el-button>
           <el-button v-if="row.status === 'ON'" link type="warning" @click="toggle(row, 'OFF')">下架</el-button>
@@ -74,9 +101,11 @@
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { useIsMobile } from '@/composables/useIsMobile';
 import { adminDeleteProduct, adminListProducts, adminSetProductStatus, type ProductRow } from '@/api/products';
 import { fenToYuan } from '@/utils/money';
 
+const { isMobile } = useIsMobile();
 const router = useRouter();
 const loading = ref(false);
 const rows = ref<ProductRow[]>([]);
@@ -88,6 +117,14 @@ const total = ref(0);
 
 function totalStock(row: ProductRow) {
   return row.skus.reduce((sum, s) => sum + s.stock, 0);
+}
+
+/** 卡片上的价格：单 SKU 就一个价，多 SKU 显示区间 */
+function priceText(row: ProductRow) {
+  if (!row.skus.length) return '—';
+  const first = fenToYuan(row.skus[0].price);
+  const last = fenToYuan(row.skus[row.skus.length - 1].price);
+  return first === last ? first : `${first}~${last}`;
 }
 
 async function load() {
@@ -181,5 +218,77 @@ onMounted(load);
 .pager {
   margin-top: 16px;
   justify-content: flex-end;
+}
+
+/* ─────────── 手机卡片流 ─────────── */
+.p-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 120px;
+}
+.p-card {
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  background: var(--ink-850);
+  padding: 12px;
+}
+.p-hd {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.p-cover {
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line-1);
+}
+.p-cover.ph {
+  display: grid;
+  place-items: center;
+  border-style: dashed;
+  border-color: var(--line-3);
+  font-size: 10px;
+  color: var(--text-lo);
+}
+.p-info {
+  flex: 1;
+  min-width: 0;
+}
+.p-name {
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--text-hi);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.p-sub {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--text-mid);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.p-meta {
+  margin-top: 5px;
+  font-size: 11.5px;
+  color: var(--text-lo);
+}
+.p-acts {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-1);
+}
+.p-acts .el-button {
+  flex: 1;
+  margin-left: 0;
 }
 </style>

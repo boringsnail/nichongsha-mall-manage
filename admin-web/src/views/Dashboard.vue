@@ -246,7 +246,7 @@
           <el-table-column label="最近时间" width="176">
             <template #default="{ row }"><span class="mono muted">{{ formatTime(row.lastAt) }}</span></template>
           </el-table-column>
-          <el-table-column label="操作" width="92" fixed="right">
+          <el-table-column label="操作" width="92" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <el-button link type="primary" @click="openUserLogs(row)">记录</el-button>
             </template>
@@ -339,6 +339,7 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 import { CanvasRenderer } from 'echarts/renderers';
 import type { ECharts } from 'echarts/core';
 import { ElMessage } from 'element-plus';
+import { useIsMobile } from '@/composables/useIsMobile';
 import {
   adminAdvice,
   adminFunnel,
@@ -365,6 +366,7 @@ import {
 import { fenToYuan } from '@/utils/money';
 import { useThemeStore } from '@/stores/theme';
 
+const { isMobile } = useIsMobile();
 const theme = useThemeStore();
 
 // 按需注册，避免整包打入（Dashboard chunk 可减小数百 KB）
@@ -1577,6 +1579,60 @@ onBeforeUnmount(() => {
   .search-kpi {
     border-right: none;
     border-bottom: 1px solid var(--line-1);
+  }
+}
+/* ─────────── 手机（≤900px）：一屏放不下并排，全部改上下 ─────────── */
+@media (max-width: 900px) {
+  /* 六格读数在手机上 3 列会挤成一团，改 2 列 × 3 行 */
+  .kpi-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .kpi {
+    padding: 11px 12px 12px;
+    border-right: 1px solid var(--line-1);
+    border-bottom: 1px solid var(--line-1);
+  }
+  .kpi:nth-child(2n) {
+    border-right: none;
+  }
+  .kpi:nth-last-child(-n + 2) {
+    border-bottom: none;
+  }
+  .kpi-val .num {
+    font-size: 20px;
+  }
+  /* 搜索分析：3 格读数压成一行，榜单与搜索用户上下排 */
+  .search-kpi {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .search-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .kw-row {
+    grid-template-columns: minmax(0, 1fr) 84px 38px;
+    gap: 8px;
+  }
+  /* 单品趋势抽屉里的 4 格读数改 2×2 */
+  .prod-kpi {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .pk:nth-child(2n) {
+    border-right: none;
+  }
+  .pk:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--line-1);
+  }
+  .prod-hd {
+    gap: 10px;
+  }
+  .prod-cover {
+    width: 46px;
+    height: 46px;
+  }
+  /* 表格列多，手机上让表头吸顶后仍能看清分组 */
+  .lowstock-more {
+    display: block;
+    padding: 8px 0;
   }
 }
 </style>

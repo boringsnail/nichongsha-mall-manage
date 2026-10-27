@@ -55,7 +55,56 @@
       </span>
     </div>
 
-    <el-table v-loading="loading" :data="rows" class="as-table">
+    <!-- 手机：9 列横滑看不到操作 → 卡片流，金额与「同意/拒绝」都在一屏内 -->
+    <div v-if="isMobile" v-loading="loading" class="as-list">
+      <article v-for="row in rows" :key="row.afterSaleNo" class="as-card">
+        <div class="as-hd">
+          <span class="mono as-no">{{ row.afterSaleNo }}</span>
+          <el-tag size="small" :type="statusTag(row.status)">{{ statusText(row.status) }}</el-tag>
+        </div>
+
+        <div class="as-mid">
+          <div class="as-info">
+            <div class="as-user">{{ row.user?.nickname || '微信用户' }}</div>
+            <div class="as-reason">{{ row.reasonText }}</div>
+            <div class="mono as-sub">订单 {{ row.orderNo }}</div>
+          </div>
+          <div class="as-amt">
+            <div>
+              <span class="as-num mono">{{ fenToYuan(row.refundAmount) }}</span>
+              <span class="as-unit">元</span>
+            </div>
+            <el-tag size="small" :type="row.type === 'REFUND_ONLY' ? 'warning' : 'primary'">
+              {{ row.type === 'REFUND_ONLY' ? '仅退款' : '退货退款' }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div v-if="row.status === 'PENDING' && rowEscalated(row)" class="as-warn">
+          已升级，{{ daysPending(row.createdAt) }} 天未处理
+        </div>
+        <div v-else-if="row.status === 'PENDING' && rowOverdue(row)" class="as-warn amber">
+          已超时，待你确认
+        </div>
+
+        <div class="as-foot">
+          <span class="mono as-time">{{ formatTime(row.createdAt) }}</span>
+          <div class="as-acts">
+            <el-button size="small" @click="openDetail(row.afterSaleNo)">详情</el-button>
+            <template v-if="row.status === 'PENDING'">
+              <el-button size="small" type="success" plain @click="approve(row)">同意</el-button>
+              <el-button size="small" type="danger" plain @click="openReject(row)">拒绝</el-button>
+            </template>
+            <el-button v-if="row.status === 'RETURNING'" size="small" type="success" @click="receive(row)">
+              确认收货退款
+            </el-button>
+          </div>
+        </div>
+      </article>
+      <el-empty v-if="!loading && !rows.length" description="没有售后单" />
+    </div>
+
+    <el-table v-else v-loading="loading" :data="rows" class="as-table">
       <el-table-column prop="afterSaleNo" label="售后单号" width="170" />
       <el-table-column prop="orderNo" label="订单号" width="170" />
       <el-table-column label="用户" width="140">
@@ -89,7 +138,7 @@
       <el-table-column label="申请时间" width="170" class-name="num-cell time-cell">
         <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="190" fixed="right">
+      <el-table-column label="操作" width="190" :fixed="isMobile ? false : 'right'">
         <template #default="{ row }">
           <el-button link type="primary" @click="openDetail(row.afterSaleNo)">详情</el-button>
           <template v-if="row.status === 'PENDING'">
@@ -254,6 +303,7 @@
 </template>
 
 <script setup lang="ts">
+import { useIsMobile } from '@/composables/useIsMobile';
 import { onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -268,6 +318,7 @@ import {
 } from '@/api/afterSales';
 import { fenToYuan } from '@/utils/money';
 
+const { isMobile } = useIsMobile();
 type TagType = 'success' | 'warning' | 'info' | 'primary' | 'danger';
 
 const STATUS_LIST: { label: string; value: AfterSaleStatus; tag: TagType }[] = [
@@ -599,5 +650,117 @@ onMounted(() => {
   border-radius: var(--r-1);
   border: 1px solid var(--line-1);
   flex-shrink: 0;
+}
+/* ─────────── 手机卡片流 ─────────── */
+.as-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 120px;
+}
+.as-card {
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  background: var(--ink-850);
+  padding: 12px;
+}
+.as-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.as-no {
+  font-size: 12px;
+  color: var(--text-hi);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.as-mid {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 9px;
+}
+.as-info {
+  min-width: 0;
+  flex: 1;
+}
+.as-user {
+  font-size: 13.5px;
+  color: var(--text-hi);
+}
+.as-reason {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--text-mid);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.as-sub {
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--text-lo);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.as-amt {
+  flex: none;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.as-num {
+  font-size: 17px;
+  color: var(--text-hi);
+}
+.as-unit {
+  margin-left: 3px;
+  font-size: 10.5px;
+  color: var(--text-lo);
+}
+.as-warn {
+  margin-top: 9px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--red);
+  background: var(--red-soft);
+  border-left: 2px solid var(--red);
+}
+.as-warn.amber {
+  color: var(--amber);
+  background: var(--amber-soft);
+  border-left-color: var(--amber);
+}
+.as-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-1);
+}
+.as-time {
+  font-size: 10.5px;
+  color: var(--text-lo);
+  flex: none;
+}
+.as-acts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.as-acts .el-button {
+  margin-left: 0;
 }
 </style>

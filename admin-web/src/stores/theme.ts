@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
+import { syncStatusBar } from '@/native/shell';
 
 export type ThemeMode = 'light' | 'dark';
 
@@ -22,6 +23,8 @@ export const useThemeStore = defineStore('theme', () => {
     root.style.background = next === 'dark' ? '#0a0f12' : '#f2f4f7';
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', next === 'dark' ? '#0a0f12' : '#f2f4f7');
     document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', next);
+    // App 内同步系统状态栏；浏览器里这是个空操作
+    void syncStatusBar(next);
     try {
       localStorage.setItem(LS_KEY, next);
     } catch {

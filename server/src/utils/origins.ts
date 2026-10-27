@@ -14,9 +14,16 @@ import type { Request } from 'express';
  *   ③ `*.wechat.com`（小程序开发者工具、servicewechat.com 等）
  */
 
+/**
+ * 混合应用 WebView 的固定来源。
+ *   · Capacitor（本项目用）Android 默认 https://localhost，iOS 默认 capacitor://localhost
+ *   · 早期 Cordova / Ionic 用 ionic://localhost
+ * 这些值不可能被外部网站伪造出「合法收益」——即便被伪造成 Origin，请求仍需带有效 JWT。
+ */
+const HYBRID_APP_ORIGINS = ['https://localhost', 'capacitor://localhost', 'ionic://localhost'];
+
 /** 逗号分隔的来源列表：去空白、去末尾斜杠、统一小写；空串视为未配置 */
-export function parseOrigins(raw: string | undefined): string[] | undefined {
-  if (raw === undefined) return undefined;
+export function parseOrigins(raw: string | undefined): string[] | undefined {  if (raw === undefined) return undefined;
   const list = raw
     .split(',')
     .map((o) => o.trim().replace(/\/+$/, '').toLowerCase())
@@ -37,6 +44,10 @@ export function hostnameOf(value: string | undefined): string {
 export function isAllowedOrigin(origin: string, req: Request, allOrigins: string[]): boolean {
   const normalized = origin.replace(/\/+$/, '').toLowerCase();
   if (allOrigins.includes(normalized)) return true;
+  // 混合应用（Capacitor 打包的 iOS / Android）把页面打进了本地 WebView，
+  // 来源固定是 localhost，和后端永远不同域 —— 不放行的话 App 内所有请求都会被 403 拦掉。
+  // 只认这几种固定值，别的 localhost 端口（比如本机起的调试服务）仍然走白名单。
+  if (HYBRID_APP_ORIGINS.includes(normalized)) return true;
   // 微信侧来源：小程序开发者工具（servicewechat.com）与 *.wechat.com
   if (normalized === 'https://servicewechat.com' || normalized.endsWith('.wechat.com')) return true;
   const forwardedHost = req.headers['x-forwarded-host'];

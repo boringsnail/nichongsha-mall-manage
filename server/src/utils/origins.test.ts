@@ -30,6 +30,15 @@ describe('CORS 来源判定', () => {
     expect(isAllowedOrigin('https://open.wechat.com', req({}), [])).toBe(true);
   });
 
+  it('混合应用 WebView 的固定来源放行（否则 App 内全部 403）', () => {
+    expect(isAllowedOrigin('https://localhost', req({ host: 'api.test' }), [])).toBe(true);
+    expect(isAllowedOrigin('capacitor://localhost', req({ host: 'api.test' }), [])).toBe(true);
+    expect(isAllowedOrigin('ionic://localhost', req({ host: 'api.test' }), [])).toBe(true);
+    // 本机起的调试服务不是 WebView，仍按白名单处理
+    expect(isAllowedOrigin('http://localhost:5173', req({ host: 'api.test' }), [])).toBe(false);
+    expect(isAllowedOrigin('http://localhost:5173', req({ host: 'api.test' }), ['http://localhost:5173'])).toBe(true);
+  });
+
   it('parseOrigins：去空白/末尾斜杠/小写，空串视为未配置', () => {
     expect(parseOrigins(' https://A.com/ , https://b.com ')).toEqual(['https://a.com', 'https://b.com']);
     expect(parseOrigins('')).toBeUndefined();

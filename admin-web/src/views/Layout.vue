@@ -1,13 +1,17 @@
 <template>
   <div class="shell">
+    <!-- 手机上侧栏是抽屉：点遮罩或选中菜单后自动收起 -->
+    <div v-if="navOpen" class="scrim" @click="navOpen = false" />
+
     <!-- ───────────────── 左侧调度栏 ───────────────── -->
-    <aside class="rail">
+    <aside class="rail" :class="{ open: navOpen }">
       <div class="brand">
         <div class="brand-mark">宠</div>
         <div class="brand-text">
           <div class="brand-name">你宠啥</div>
           <div class="label">dispatch console</div>
         </div>
+        <button class="rail-close" type="button" aria-label="收起菜单" @click="navOpen = false">×</button>
       </div>
 
       <nav class="nav">
@@ -43,6 +47,13 @@
     <div class="stage">
       <header class="topbar">
         <div class="topbar-left">
+          <button class="nav-toggle" type="button" aria-label="打开菜单" @click="navOpen = true">
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+              <g stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+                <path d="M2.4 4h11.2M2.4 8h11.2M2.4 12h11.2" />
+              </g>
+            </svg>
+          </button>
           <span class="label">ops</span>
           <span class="slash">/</span>
           <span class="page-title">{{ pageTitle }}</span>
@@ -167,7 +178,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '@/stores/auth';
@@ -233,6 +244,15 @@ const NAV: NavGroup[] = [
 
 const pageTitle = computed(() => (route.meta.title as string) || '');
 const merchantName = computed(() => auth.merchant?.nickname || auth.merchant?.username || '');
+
+// 手机端抽屉：路由一变就收起，否则点完菜单抽屉还盖在内容上
+const navOpen = ref(false);
+watch(
+  () => route.fullPath,
+  () => {
+    navOpen.value = false;
+  },
+);
 
 function isActive(path: string): boolean {
   if (path === '/products') return route.path === '/products' || route.path.startsWith('/products/');
@@ -689,5 +709,134 @@ onBeforeUnmount(() => {
   font-size: 10.5px;
   line-height: 1.6;
   color: var(--text-lo);
+}
+
+/* ───────────────── 手机端：侧栏变抽屉 ───────────────── */
+/* 触发按钮与关闭按钮只在窄屏出现，桌面端完全不影响原有排布 */
+.nav-toggle,
+.rail-close {
+  display: none;
+}
+.nav-toggle {
+  width: 30px;
+  height: 30px;
+  margin-right: 2px;
+  flex: none;
+  place-items: center;
+  background: transparent;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-1);
+  color: var(--text-mid);
+  cursor: pointer;
+}
+.nav-toggle:active {
+  background: var(--hover);
+  color: var(--text-hi);
+}
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgb(0 0 0 / 0.45);
+  animation: scrim-in var(--dur-2, 180ms) ease;
+}
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  /* dvh：手机浏览器地址栏收起/展开时 100vh 会跳，dvh 不会 */
+  .shell {
+    height: 100dvh;
+  }
+  .nav-toggle {
+    display: grid;
+  }
+  .rail {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    width: 264px;
+    max-width: 82vw;
+    transform: translateX(-100%);
+    transition: transform 200ms cubic-bezier(0.32, 0.72, 0, 1);
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    box-shadow: 0 0 40px rgb(0 0 0 / 0.35);
+  }
+  .rail.open {
+    transform: none;
+  }
+  .rail-close {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-1);
+    color: var(--text-mid);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  /* 手机上菜单项放大到 44px，手指点得准 */
+  .nav-item {
+    height: 44px;
+    font-size: 14px;
+  }
+  .nav {
+    padding-bottom: 24px;
+  }
+  .topbar {
+    height: 48px;
+    padding: 0 10px;
+    padding-top: env(safe-area-inset-top);
+    gap: 8px;
+  }
+  .topbar-left {
+    gap: 6px;
+  }
+  .main {
+    padding: 10px 10px calc(14px + env(safe-area-inset-bottom));
+    -webkit-overflow-scrolling: touch;
+  }
+  /* 手机顶栏只留「菜单 / 标题 / 提醒 / 头像」，时钟与主题色块先让位 */
+  .clock,
+  .divider,
+  .slash {
+    display: none;
+  }
+  .topbar-right {
+    gap: 6px;
+  }
+  .unlock-chip {
+    height: 24px;
+    padding: 0 8px;
+    font-size: 10px;
+  }
+  .unlock-chip .dot-live {
+    display: none;
+  }
+  .user-name {
+    max-width: 76px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 420px) {
+  .unlock-chip {
+    display: none;
+  }
+  .page-title {
+    font-size: 12.5px;
+  }
 }
 </style>

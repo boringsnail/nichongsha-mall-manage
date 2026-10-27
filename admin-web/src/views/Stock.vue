@@ -37,7 +37,7 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="110" fixed="right">
+      <el-table-column label="操作" width="110" :fixed="isMobile ? false : 'right'">
         <template #default="{ row }">
           <el-button link type="primary" :loading="row._saving" @click="save(row)">保存</el-button>
         </template>
@@ -58,9 +58,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
+import { useIsMobile } from '@/composables/useIsMobile';
 import { adminListSkus, adminSetSkuStock, type StockSku } from '@/api/products';
 import { fenToYuan } from '@/utils/money';
 
+const { isMobile } = useIsMobile();
 const loading = ref(false);
 const rows = ref<StockSku[]>([]);
 const keyword = ref('');

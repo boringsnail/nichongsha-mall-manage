@@ -88,12 +88,12 @@
             </template>
           </el-table-column>
           <!-- 会话列：同一个 sessionId 下的浏览属于同一次到访，能把游客的轨迹串起来 -->
-          <el-table-column label="会话" width="210">
+          <el-table-column v-if="!isMobile" label="会话" width="210">
             <template #default="{ row }">
               <span class="mono muted" :title="row.sessionId || ''">{{ row.sessionId || '—' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="96" fixed="right">
+          <el-table-column label="操作" width="96" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <el-button v-if="row.user" link type="primary" @click="focusUser(row.user.id, row.user.nickname || '微信用户')">
                 只看他
@@ -140,7 +140,7 @@
               <span :title="row.userAgent || ''">{{ deviceText(row.userAgent) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="96" fixed="right">
+          <el-table-column label="操作" width="96" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <el-button v-if="row.user" link type="primary" @click="focusUser(row.user.id, row.user.nickname || '微信用户')">
                 只看他
@@ -204,7 +204,7 @@
           <el-table-column label="加入时间" width="176" class-name="num-cell">
             <template #default="{ row }"><span class="mono">{{ formatTime(row.createdAt) }}</span></template>
           </el-table-column>
-          <el-table-column label="操作" width="96" fixed="right">
+          <el-table-column label="操作" width="96" :fixed="isMobile ? false : 'right'">
             <template #default="{ row }">
               <el-button link type="primary" @click="focusUser(row.user.id, row.user.nickname || '微信用户')">
                 只看他
@@ -228,6 +228,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
+import { useIsMobile } from '@/composables/useIsMobile';
 import {
   adminCarts,
   adminLoginLogs,
@@ -240,6 +241,7 @@ import {
 } from '@/api/visits';
 import { fenToYuan } from '@/utils/money';
 
+const { isMobile } = useIsMobile();
 /* ------------------------------------------------------------ 状态 */
 const days = ref(30);
 const overview = ref<VisitOverview | null>(null);
@@ -676,6 +678,46 @@ onMounted(() => {
   }
   .kpi:nth-child(-n + 3) {
     border-bottom: 1px solid var(--line-1);
+  }
+}
+/* 手机：六格读数 2×3，标签页横向可滑，筛选 chip 独占一行 */
+@media (max-width: 900px) {
+  .kpi-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .kpi {
+    padding: 11px 12px 12px;
+    border-right: 1px solid var(--line-1);
+    border-bottom: 1px solid var(--line-1);
+  }
+  .kpi:nth-child(2n) {
+    border-right: none;
+  }
+  .kpi:nth-last-child(-n + 2) {
+    border-bottom: none;
+  }
+  .kpi-val .num {
+    font-size: 20px;
+  }
+  .tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+  }
+  .tab-btn {
+    flex: none;
+    height: 38px;
+    padding: 0 10px;
+  }
+  .hd-tools {
+    flex-wrap: wrap;
+  }
+  .user-chip {
+    max-width: 100%;
+  }
+  .pager {
+    margin: 10px 12px;
+    justify-content: center;
   }
 }
 </style>

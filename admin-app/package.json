@@ -1,0 +1,23 @@
+{
+  "name": "nichongsha-admin-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "你宠啥商家调度台 · Capacitor 原生壳（iOS / Android）",
+  "type": "module",
+  "scripts": {
+    "sync": "cap sync android",
+    "open": "cap open android",
+    "build:web": "npm --prefix ../admin-web run build && cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.6.9",
+    "@capacitor/app": "^7.1.2",
+    "@capacitor/cli": "^7.6.9",
+    "@capacitor/core": "^7.6.9",
+    "@capacitor/preferences": "^7.0.4",
+    "@capacitor/status-bar": "^7.0.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,8 +1,11 @@
 node_modules/
 dist/
+dist-app/
 build/
 .DS_Store
 *.log
 .env
 .env.*
+# App 构建用的公开配置（只有接口地址，不含密钥）
+!.env.app
 *.tsbuildinfo

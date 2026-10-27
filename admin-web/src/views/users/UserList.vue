@@ -17,7 +17,7 @@
     </div>
 
     <el-table v-loading="loading" :data="rows" border stripe>
-      <el-table-column prop="id" label="ID" width="70" />
+      <el-table-column v-if="!isMobile" prop="id" label="ID" width="70" />
       <el-table-column label="用户" min-width="180">
         <template #default="{ row }">
           <div class="user-cell">
@@ -27,6 +27,10 @@
             <div>
               <div>{{ row.nickname || '微信用户' }}</div>
               <div class="muted">{{ shortOpenid(row.openid) }}</div>
+              <!-- 手机上「累计消费 / 成交单数 / 最近成交」三列放不下，压成一行塞进用户格 -->
+              <div v-if="isMobile" class="muted u-stat">
+                消费 {{ fenToYuan(row.totalSpent) }} · {{ row.paidOrderCount }} 单
+              </div>
             </div>
           </div>
         </template>
@@ -34,19 +38,19 @@
       <el-table-column label="手机号" width="130">
         <template #default="{ row }">{{ row.phone || '-' }}</template>
       </el-table-column>
-      <el-table-column label="累计消费" width="110">
+      <el-table-column v-if="!isMobile" label="累计消费" width="110">
         <template #default="{ row }">{{ fenToYuan(row.totalSpent) }}</template>
       </el-table-column>
-      <el-table-column label="成交单数" width="100">
+      <el-table-column v-if="!isMobile" label="成交单数" width="100">
         <template #default="{ row }">{{ row.paidOrderCount }} / {{ row.orderCount }}</template>
       </el-table-column>
-      <el-table-column label="最近成交" width="170">
+      <el-table-column v-if="!isMobile" label="最近成交" width="170">
         <template #default="{ row }">{{ row.lastPaidAt ? formatTime(row.lastPaidAt) : '-' }}</template>
       </el-table-column>
-      <el-table-column label="注册时间" width="170">
+      <el-table-column v-if="!isMobile" label="注册时间" width="170">
         <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="90" fixed="right">
+      <el-table-column label="操作" width="90" :fixed="isMobile ? false : 'right'">
         <template #default="{ row }">
           <el-button link type="primary" @click="openDetail(row.id)">详情</el-button>
         </template>
@@ -120,9 +124,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
+import { useIsMobile } from '@/composables/useIsMobile';
 import { adminListUsers, adminGetUser, type AdminUserDetail, type AdminUserRow } from '@/api/users';
 import { fenToYuan } from '@/utils/money';
 
+const { isMobile } = useIsMobile();
 type TagType = 'success' | 'warning' | 'info' | 'primary' | 'danger';
 
 const STATUS_MAP: Record<string, { label: string; tag: TagType }> = {

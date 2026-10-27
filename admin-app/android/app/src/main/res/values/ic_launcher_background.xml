@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 与图标底色一致：深墨 #0f171b，自适应图标在圆/方遮罩下都不露白边 -->
+    <color name="ic_launcher_background">#0F171B</color>
+</resources>
