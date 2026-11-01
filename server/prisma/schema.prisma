@@ -303,6 +303,9 @@ model Order {
   afterSaleStatus  String?     @db.VarChar(16)
   // 该订单已退款总额（分）：用于校验超额退款
   refundedAmount   Int         @default(0)
+  // 配送照片（JSON 数组，绝对地址）：商家发货/送达时拍一张存证，
+  // 小程序订单详情里给顾客看「东西放门口了」。和物流单号一样属于履约凭证。
+  deliveryPhotos   String?     @db.Text
   user             User        @relation(fields: [userId], references: [id])
   items            OrderItem[]
   afterSales       AfterSale[]

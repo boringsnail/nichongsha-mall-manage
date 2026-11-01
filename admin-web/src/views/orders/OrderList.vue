@@ -89,7 +89,13 @@
 
         <div class="o-acts">
           <el-button size="small" @click="openDetail(row.orderNo)">详情</el-button>
-          <el-button v-if="row.status === 'PAID'" size="small" type="primary" @click="openShip(row.orderNo)">
+          <!-- 已退款的单不给发货入口：钱都退了再发货就是纯亏损，后端也会拦 -->
+          <el-button
+            v-if="row.status === 'PAID' && !isRefunded(row)"
+            size="small"
+            type="primary"
+            @click="openShip(row.orderNo)"
+          >
             发货
           </el-button>
           <el-button
@@ -172,7 +178,7 @@
       <el-table-column label="操作" width="200" :fixed="isMobile ? false : 'right'">
         <template #default="{ row }">
           <el-button link type="primary" @click="openDetail(row.orderNo)">详情</el-button>
-          <el-button v-if="row.status === 'PAID'" link type="success" @click="openShip(row.orderNo)">发货</el-button>
+          <el-button v-if="row.status === 'PAID' && !isRefunded(row)" link type="success" @click="openShip(row.orderNo)">发货</el-button>
           <el-button v-if="row.status === 'PAID' || row.status === 'SHIPPED'" link type="warning" @click="syncOne(row.orderNo)">
             同步
           </el-button>
@@ -254,6 +260,28 @@
               <span v-else class="muted logi-text">无快递单号</span>
             </template>
           </el-descriptions-item>
+          <el-descriptions-item label="配送照片" :span="isMobile ? 1 : 2">
+            <!-- 发货时没拍也没关系，这里随时补传；已取消的单只读 -->
+            <div class="dp-cell">
+              <ImagePicker
+                v-if="detail.status !== 'CANCELLED'"
+                v-model="detailPhotos"
+                :max="3"
+                @update:model-value="saveDetailPhotos"
+              />
+              <div v-else class="dp-thumbs">
+                <img v-for="(p, i) in detailPhotos" :key="`${p}-${i}`" :src="mediaSrc(p)" class="dp-thumb" alt="" />
+                <span v-if="!detailPhotos.length" class="muted">—</span>
+              </div>
+              <div class="dp-hint">
+                {{
+                  detail.status === 'CANCELLED'
+                    ? '订单已取消，不能再上传配送照片'
+                    : '发货或送达时拍一张（最多 3 张），顾客在小程序「订单详情」里能看到'
+                }}
+              </div>
+            </div>
+          </el-descriptions-item>
           <el-descriptions-item v-if="detail.remark" label="备注" :span="isMobile ? 1 : 2">{{ detail.remark }}</el-descriptions-item>
         </el-descriptions>
         <div class="net-hint">
@@ -331,6 +359,13 @@
             title="用户自提无需快递单号，请把提货码与提货门店告知用户"
           />
         </template>
+
+        <el-form-item label="配送照片">
+          <div class="dp-cell">
+            <ImagePicker v-model="shipForm.photos" :max="3" />
+            <div class="dp-hint">选填。拍一张送达/放置位置的照片，顾客在小程序里能看到</div>
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="shipVisible = false">取消</el-button>
@@ -346,11 +381,13 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { useIsMobile } from '@/composables/useIsMobile';
 import { mediaSrc } from '@/api/media';
+import ImagePicker from '@/components/ImagePicker.vue';
 import {
   adminListOrders,
   adminGetOrder,
   adminShipOrder,
   adminSetDeliveryCost,
+  adminSetDeliveryPhotos,
   adminSyncOrderFromWechat,
   adminSyncOrdersFromWechat,
   LOGISTICS_TYPE,
@@ -431,6 +468,16 @@ const formatTime = (t: string) => new Date(t).toLocaleString('zh-CN', { hour12: 
 /** 单笔净额 = 总金额 − 退款 − 配送成本，和大盘净营业额同一个口径 */
 const netOf = (o: { totalAmount: number; refundedAmount: number; deliveryCost: number }) =>
   o.totalAmount - o.refundedAmount - o.deliveryCost;
+
+/**
+ * 是否已（全额）退款。
+ *
+ * 微信侧退款只改退款金额，不会把本地 status 从 PAID 挪走 —— 所以光看 status
+ * 判断「能不能发货」就会漏掉「钱退了还在发货」这种纯亏单。
+ * 部分退款（比如只退了运费）仍然允许发货，这里只拦全额。
+ */
+const isRefunded = (o: { totalAmount: number; refundedAmount: number; afterSaleStatus?: string | null }) =>
+  o.afterSaleStatus === 'COMPLETED' || (o.refundedAmount > 0 && o.refundedAmount >= o.totalAmount);
 
 const router = useRouter();
 const route = useRoute();
@@ -725,11 +772,14 @@ async function openDetail(orderNo: string) {
   detailVisible.value = true;
   detailLoading.value = true;
   detail.value = null;
+  detailPhotos.value = [];
   // 上一单可能停在编辑态，不清掉会让新单直接进编辑框
   detailCostEditing.value = false;
   detailCostYuan.value = undefined;
   try {
-    detail.value = await adminGetOrder(orderNo);
+    const d = await adminGetOrder(orderNo);
+    detail.value = d;
+    detailPhotos.value = d.deliveryPhotos ?? [];
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '加载失败');
   } finally {
@@ -737,17 +787,46 @@ async function openDetail(orderNo: string) {
   }
 }
 
+/* ---------- 详情里补传配送照片 ----------
+ * ImagePicker 每次上传/删除都会 emit 新数组，这里立刻整组提交：
+ * 弹窗里没有「保存」按钮，多一个按钮商家就会忘了点。
+ */
+const detailPhotos = ref<string[]>([]);
+const detailPhotosSaving = ref(false);
+
+async function saveDetailPhotos(next: string[]) {
+  const d = detail.value;
+  if (!d || detailPhotosSaving.value) return;
+  // 组件内部已经改过 v-model，这里再同步一次，避免父层数组引用和提交内容不一致
+  detailPhotos.value = next;
+  detailPhotosSaving.value = true;
+  try {
+    const r = await adminSetDeliveryPhotos(d.orderNo, next);
+    d.deliveryPhotos = r.deliveryPhotos;
+    const row = rows.value.find((x) => x.orderNo === d.orderNo);
+    if (row) row.hasDeliveryPhoto = r.deliveryPhotos.length > 0;
+    ElMessage.success(r.deliveryPhotos.length ? '配送照片已保存' : '配送照片已清空');
+  } catch (e) {
+    // 失败就把界面回滚成服务端的真实状态，别让人以为存上了
+    detailPhotos.value = d.deliveryPhotos ?? [];
+    ElMessage.error(e instanceof Error ? e.message : '照片保存失败');
+  } finally {
+    detailPhotosSaving.value = false;
+  }
+}
+
 const shipVisible = ref(false);
 const shipping = ref(false);
 const shipOrderNo = ref('');
 // logisticsType 默认快递，和绝大多数订单一致；改成同城/自提时不再要求填快递单号
-const shipForm = reactive({ logisticsType: 1, logisticsCompany: '', trackingNo: '' });
+const shipForm = reactive({ logisticsType: 1, logisticsCompany: '', trackingNo: '', photos: [] as string[] });
 
 function openShip(orderNo: string) {
   shipOrderNo.value = orderNo;
   shipForm.logisticsType = LOGISTICS_TYPE.EXPRESS;
   shipForm.logisticsCompany = '';
   shipForm.trackingNo = '';
+  shipForm.photos = [];
   shipVisible.value = true;
 }
 
@@ -764,6 +843,7 @@ async function submitShip() {
       // 非快递模式后端会把物流公司写成「同城配送」/「用户自提」，这里不传公司
       logisticsCompany: isExpress ? shipForm.logisticsCompany.trim() : undefined,
       trackingNo: shipForm.trackingNo.trim() || undefined,
+      photos: shipForm.photos.length ? shipForm.photos : undefined,
     });
     shipVisible.value = false;
     ElMessage.success(`已发货（${LOGISTICS_TYPE_TEXT[shipForm.logisticsType]}）`);
@@ -988,6 +1068,32 @@ onBeforeUnmount(() => {
   font-size: 9px;
   letter-spacing: 0.06em;
   color: var(--text-lo);
+}
+
+/* 配送照片：详情里能传能删，手机上一行放不下就换行 */
+.dp-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+.dp-hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-lo);
+}
+.dp-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dp-thumb {
+  width: 88px;
+  height: 88px;
+  object-fit: cover;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  background: var(--ink-820);
 }
 
 /* 动效敏感的人：呼吸灯和高亮直接关掉，状态本身仍然在更新 */

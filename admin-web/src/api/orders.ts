@@ -18,6 +18,8 @@ export interface AdminOrderRow {
   /** 订单最新一笔售后的状态，无售后为 null */
   afterSaleStatus?: string | null;
   hasAfterSale?: boolean;
+  /** 是否已上传配送照片（列表只给标记，不塞图片地址） */
+  hasDeliveryPhoto?: boolean;
 }
 
 export interface AdminOrderDetail extends Omit<AdminOrderRow, 'itemCount'> {
@@ -30,6 +32,8 @@ export interface AdminOrderDetail extends Omit<AdminOrderRow, 'itemCount'> {
   /** 物流模式：1 快递发货 / 2 同城配送 / 3 虚拟商品 / 4 用户自提 */
   logisticsType: number;
   address: { receiverName: string; phone: string; province: string; city: string; district: string; detail: string };
+  /** 配送照片（绝对地址，最多 3 张）：发货/送达时拍的存证，小程序订单详情里给顾客看 */
+  deliveryPhotos: string[];
   items: { productName: string; specName: string; coverImage: string; price: number; quantity: number }[];
 }
 
@@ -74,6 +78,8 @@ export interface ShipInput {
   logisticsCompany?: string;
   /** 快递必填；自提时可选填提货码 */
   trackingNo?: string;
+  /** 发货时顺手拍的配送照片（选填，最多 3 张） */
+  photos?: string[];
 }
 
 export function adminShipOrder(orderNo: string, data: ShipInput): Promise<AdminOrderDetail> {
@@ -126,4 +132,20 @@ export interface DeliveryCostResult {
  */
 export function adminSetDeliveryCost(orderNo: string, deliveryCost: number): Promise<DeliveryCostResult> {
   return api.put<DeliveryCostResult>(`/admin/orders/${orderNo}/delivery-cost`, { deliveryCost });
+}
+
+export interface DeliveryPhotosResult {
+  orderNo: string;
+  /** 保存后的照片列表 */
+  deliveryPhotos: string[];
+  /** 保存前的照片列表，方便前端做撤销提示 */
+  previous: string[];
+}
+
+/**
+ * 录入配送照片（整组替换，传 [] 即清空）。
+ * 和配送成本分开一个接口：成本是「钱」，照片是「履约凭证」，补传时机完全不同。
+ */
+export function adminSetDeliveryPhotos(orderNo: string, photos: string[]): Promise<DeliveryPhotosResult> {
+  return api.put<DeliveryPhotosResult>(`/admin/orders/${orderNo}/delivery-photos`, { photos });
 }

@@ -1,7 +1,40 @@
 import { prisma } from '../db.js';
-import { notFound, orderIllegal } from '../utils/HttpError.js';
+import { notFound, orderIllegal, badRequest } from '../utils/HttpError.js';
 import { syncFulfillmentQuietly } from './orderService.js';
 import { getWechatOrderState, LOGISTICS_TYPE, LOGISTICS_TYPE_LABEL } from './shippingService.js';
+
+/** 一张单最多几张配送照片：够证明「放门口了」，又不会把订单详情撑成相册 */
+export const MAX_DELIVERY_PHOTOS = 3;
+
+/** 只收自家图床的绝对地址或 /api/media/:id，别让订单表变成任意 URL 的容器 */
+const PHOTO_URL_RE = /^(https?:\/\/\S+|\/api\/media\/\d+)$/;
+
+/**
+ * deliveryPhotos 存的是 JSON 数组字符串。
+ * 历史数据、手改库、旧版本都可能塞进非法值，所以读取一律走这里兜底成 []，
+ * 绝不让一个坏字符把整个订单详情打成 500。
+ */
+export function parseDeliveryPhotos(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v): v is string => typeof v === 'string' && v.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function assertDeliveryPhotos(photos: string[]) {
+  if (photos.length > MAX_DELIVERY_PHOTOS) {
+    throw badRequest('DELIVERY_PHOTO_INVALID', `配送照片最多 ${MAX_DELIVERY_PHOTOS} 张`);
+  }
+  for (const photo of photos) {
+    if (!PHOTO_URL_RE.test(photo)) {
+      throw badRequest('DELIVERY_PHOTO_INVALID', '配送照片地址不合法，请重新上传');
+    }
+  }
+}
 
 export async function listAdminOrders(query: {
   status?: string;
@@ -56,6 +89,8 @@ export async function listAdminOrders(query: {
       // 售后角标：列表页据此显示「售后中 / 已退款」，不用再点进详情
       afterSaleStatus: o.afterSaleStatus,
       hasAfterSale: Boolean(o.afterSaleStatus),
+      // 列表只要一个「有没有传照片」的标记，卡片上给个小相机图标
+      hasDeliveryPhoto: Boolean(o.deliveryPhotos),
     })),
     total,
     page,
@@ -87,6 +122,37 @@ export async function setDeliveryCost(orderNo: string, deliveryCost: number) {
   });
 
   return { ...updated, previous: order.deliveryCost };
+}
+
+/**
+ * 录入 / 覆盖配送照片（整组替换，传空数组就是清空）。
+ *
+ * 做成整组替换而不是增删单张：前端就是「最多 3 张缩略图 + 删除 + 新增」，
+ * 整组提交省掉一套「删第几张」的接口和并发问题。
+ */
+export async function setDeliveryPhotos(orderNo: string, photos: string[]) {
+  const order = await prisma.order.findUnique({
+    where: { orderNo },
+    select: { orderNo: true, status: true, deliveryPhotos: true },
+  });
+  if (!order) throw notFound('订单不存在');
+  if (order.status === 'CANCELLED') throw orderIllegal('已取消的订单不需要上传配送照片');
+
+  assertDeliveryPhotos(photos);
+
+  const updated = await prisma.order.update({
+    where: { orderNo },
+    // 空数组存 NULL 而不是 "[]"：列表页用 Boolean(deliveryPhotos) 判有没有图，
+    // 存 "[]" 会被当成「有照片」，卡片上就多出一个空相机图标
+    data: { deliveryPhotos: photos.length ? JSON.stringify(photos) : null },
+    select: { orderNo: true, deliveryPhotos: true },
+  });
+
+  return {
+    orderNo: updated.orderNo,
+    deliveryPhotos: parseDeliveryPhotos(updated.deliveryPhotos),
+    previous: parseDeliveryPhotos(order.deliveryPhotos),
+  };
 }
 
 export async function getAdminOrderDetail(orderNo: string) {
@@ -122,6 +188,7 @@ export async function getAdminOrderDetail(orderNo: string) {
     trackingNo: order.trackingNo,
     logisticsType: order.logisticsType,
     afterSaleStatus: order.afterSaleStatus,
+    deliveryPhotos: parseDeliveryPhotos(order.deliveryPhotos),
     address: JSON.parse(order.addressSnapshot),
     items: order.items.map((i) => ({
       productName: i.productName,
@@ -139,6 +206,8 @@ export interface ShipInput {
   logisticsType: number;
   logisticsCompany?: string;
   trackingNo?: string;
+  /** 发货时顺手拍的配送照片（选填，最多 3 张） */
+  photos?: string[];
 }
 
 export async function shipOrder(orderNo: string, data: ShipInput) {
@@ -171,6 +240,17 @@ export async function shipOrder(orderNo: string, data: ShipInput) {
   }
   if (current.status !== 'PAID') throw orderIllegal('仅已支付订单可发货');
 
+  // 已退款还发货 = 钱退了货也发了，是实打实的亏损单。
+  // 微信侧退款不会改本地 status（订单本身仍是已支付），所以必须单独看退款金额。
+  const refunded = current.refundedAmount ?? 0;
+  const fullyRefunded = refunded > 0 && refunded >= current.totalAmount;
+  if (fullyRefunded || current.afterSaleStatus === 'COMPLETED') {
+    throw orderIllegal('该订单已退款，不能再发货');
+  }
+
+  const photos = data.photos ?? [];
+  if (photos.length) assertDeliveryPhotos(photos);
+
   const updated = await prisma.order.updateMany({
     where: { orderNo, status: 'PAID' },
     data: {
@@ -179,6 +259,8 @@ export async function shipOrder(orderNo: string, data: ShipInput) {
       logisticsType,
       logisticsCompany,
       trackingNo,
+      // 只在这次真带了照片时才写，避免「不传照片」把之前补传的清空
+      ...(photos.length ? { deliveryPhotos: JSON.stringify(photos) } : {}),
     },
   });
   if (updated.count !== 1) throw orderIllegal('订单状态已变化');

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { validate } from '../middleware/validate.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { listAdminOrders, getAdminOrderDetail, shipOrder, syncAdminOrderFromWechat, syncAdminOrdersFromWechat, setDeliveryCost } from '../services/adminOrderService.js';
+import { listAdminOrders, getAdminOrderDetail, shipOrder, syncAdminOrderFromWechat, syncAdminOrdersFromWechat, setDeliveryCost, setDeliveryPhotos, MAX_DELIVERY_PHOTOS } from '../services/adminOrderService.js';
 import { diagnoseWechatOrder } from '../services/shippingService.js';
 
 export const adminOrdersRouter = Router();
@@ -29,6 +29,8 @@ const shipSchema = validate({
       logisticsType: z.union([z.literal(1), z.literal(2), z.literal(4)]).default(1),
       logisticsCompany: z.string().trim().max(64).optional(),
       trackingNo: z.string().trim().max(128).optional(),
+      // 发货时顺手拍的配送照片，选填
+      photos: z.array(z.string().trim().min(1).max(512)).max(MAX_DELIVERY_PHOTOS).optional(),
     })
     .superRefine((val, ctx) => {
       if (val.logisticsType !== 1) return;
@@ -65,6 +67,26 @@ adminOrdersRouter.put(
     res.json({
       code: 0,
       data: await setDeliveryCost(req.params.orderNo, req.body.deliveryCost),
+    });
+  })
+);
+
+// 配送照片：整组替换（最多 3 张，传 [] 即清空）。
+// 单独一个接口而不是塞进发货里，是因为商家常常是「先点发货、送到了才补照片」。
+const deliveryPhotosSchema = validate({
+  params: z.object({ orderNo: z.string().regex(/^NPA\d{16}$/) }),
+  body: z.object({
+    photos: z.array(z.string().trim().min(1).max(512)).max(MAX_DELIVERY_PHOTOS),
+  }),
+});
+
+adminOrdersRouter.put(
+  '/:orderNo/delivery-photos',
+  deliveryPhotosSchema,
+  asyncHandler(async (req, res) => {
+    res.json({
+      code: 0,
+      data: await setDeliveryPhotos(req.params.orderNo, req.body.photos),
     });
   })
 );

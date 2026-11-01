@@ -147,6 +147,127 @@ describe('商家订单管理 API', () => {
     expect(res.status).toBe(400);
   });
 
+  // 线上真实事故：微信侧退了款，本地 status 仍是 PAID，商家看到「发货」就点了，
+  // 结果钱退了货也发了。这条用例把口子焊死。
+  it('ship 已全额退款订单 → 409（钱退了不能再发货）', async () => {
+    const { token, addrId } = await makeUser('a14-r1');
+    const orderNo = await createOrder(token, addrId);
+    await request(createApp()).post(`/api/orders/${orderNo}/pay`).set('Authorization', `Bearer ${token}`);
+    const before = await prisma.order.findUniqueOrThrow({ where: { orderNo } });
+    await prisma.order.update({
+      where: { orderNo },
+      data: { refundedAmount: before.totalAmount, afterSaleStatus: 'COMPLETED' },
+    });
+
+    const res = await request(createApp())
+      .post(`/api/admin/orders/${orderNo}/ship`)
+      .set('Authorization', merchantAuth())
+      .send({ logisticsCompany: '顺丰速运', trackingNo: 'SF1' });
+    expect(res.status).toBe(409);
+    expect(res.body.message).toContain('已退款');
+
+    const after = await prisma.order.findUniqueOrThrow({ where: { orderNo } });
+    expect(after.status).toBe('PAID');
+    expect(after.shippedAt).toBeNull();
+  });
+
+  it('ship 只退了一部分（运费）→ 仍可发货', async () => {
+    const { token, addrId } = await makeUser('a14-r2');
+    const orderNo = await createOrder(token, addrId);
+    await request(createApp()).post(`/api/orders/${orderNo}/pay`).set('Authorization', `Bearer ${token}`);
+    await prisma.order.update({ where: { orderNo }, data: { refundedAmount: 100 } });
+
+    const res = await request(createApp())
+      .post(`/api/admin/orders/${orderNo}/ship`)
+      .set('Authorization', merchantAuth())
+      .send({ logisticsCompany: '顺丰速运', trackingNo: 'SF1' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('SHIPPED');
+  });
+
+  it('ship 带配送照片 → 落库，详情原样返回', async () => {
+    const { token, addrId } = await makeUser('a14-p1');
+    const orderNo = await createOrder(token, addrId);
+    await request(createApp()).post(`/api/orders/${orderNo}/pay`).set('Authorization', `Bearer ${token}`);
+
+    const photos = ['https://cdn.example.com/a.jpg', '/api/media/12'];
+    const res = await request(createApp())
+      .post(`/api/admin/orders/${orderNo}/ship`)
+      .set('Authorization', merchantAuth())
+      .send({ logisticsType: 2, photos });
+    expect(res.status).toBe(200);
+
+    const detail = await request(createApp()).get(`/api/admin/orders/${orderNo}`).set('Authorization', merchantAuth());
+    expect(detail.body.data.deliveryPhotos).toEqual(photos);
+  });
+
+  it('配送照片：PUT 整组覆盖，传空数组即清空', async () => {
+    const { token, addrId } = await makeUser('a14-p2');
+    const orderNo = await createOrder(token, addrId);
+    await request(createApp()).post(`/api/orders/${orderNo}/pay`).set('Authorization', `Bearer ${token}`);
+
+    const put = (photos: string[]) =>
+      request(createApp())
+        .put(`/api/admin/orders/${orderNo}/delivery-photos`)
+        .set('Authorization', merchantAuth())
+        .send({ photos });
+
+    const first = await put(['https://cdn.example.com/1.jpg']);
+    expect(first.status).toBe(200);
+    expect(first.body.data.deliveryPhotos).toEqual(['https://cdn.example.com/1.jpg']);
+
+    // 覆盖：previous 带旧值，方便前端提示「已更新」
+    const second = await put(['https://cdn.example.com/2.jpg', 'https://cdn.example.com/3.jpg']);
+    expect(second.body.data.deliveryPhotos).toHaveLength(2);
+    expect(second.body.data.previous).toEqual(['https://cdn.example.com/1.jpg']);
+
+    // 列表页的相机标记跟着变
+    const listed = await request(createApp()).get('/api/admin/orders').set('Authorization', merchantAuth());
+    expect(listed.body.data.list[0].hasDeliveryPhoto).toBe(true);
+
+    const cleared = await put([]);
+    expect(cleared.body.data.deliveryPhotos).toEqual([]);
+    const row = await prisma.order.findUniqueOrThrow({ where: { orderNo } });
+    expect(row.deliveryPhotos).toBeNull();
+  });
+
+  it('配送照片超过 3 张 → 400', async () => {
+    const { token, addrId } = await makeUser('a14-p3');
+    const orderNo = await createOrder(token, addrId);
+    await request(createApp()).post(`/api/orders/${orderNo}/pay`).set('Authorization', `Bearer ${token}`);
+
+    const res = await request(createApp())
+      .put(`/api/admin/orders/${orderNo}/delivery-photos`)
+      .set('Authorization', merchantAuth())
+      .send({ photos: [1, 2, 3, 4].map((i) => `https://cdn.example.com/${i}.jpg`) });
+    expect(res.status).toBe(400);
+  });
+
+  it('配送照片地址不合法 → 400（不接受 javascript: 之类的伪协议）', async () => {
+    const { token, addrId } = await makeUser('a14-p4');
+    const orderNo = await createOrder(token, addrId);
+    await request(createApp()).post(`/api/orders/${orderNo}/pay`).set('Authorization', `Bearer ${token}`);
+
+    const res = await request(createApp())
+      .put(`/api/admin/orders/${orderNo}/delivery-photos`)
+      .set('Authorization', merchantAuth())
+      .send({ photos: ['javascript:alert(1)'] });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('DELIVERY_PHOTO_INVALID');
+  });
+
+  it('配送照片：已取消订单 → 409', async () => {
+    const { token, addrId } = await makeUser('a14-p5');
+    const orderNo = await createOrder(token, addrId);
+    await prisma.order.update({ where: { orderNo }, data: { status: 'CANCELLED' } });
+
+    const res = await request(createApp())
+      .put(`/api/admin/orders/${orderNo}/delivery-photos`)
+      .set('Authorization', merchantAuth())
+      .send({ photos: ['https://cdn.example.com/1.jpg'] });
+    expect(res.status).toBe(409);
+  });
+
   it('详情：返回用户/地址快照/商品明细/物流信息', async () => {
     const { token, addrId } = await makeUser('a14-7');
     const orderNo = await createOrder(token, addrId);
