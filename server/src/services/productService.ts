@@ -179,6 +179,25 @@ export async function softDeleteProduct(id: number) {
   return setProductStatus(id, 'OFF');
 }
 
+/**
+ * 批量软删：一次把多个商品置为 OFF。
+ *
+ * 语义与单条 softDeleteProduct 完全一致 —— 只改 status，不做物理删除。
+ * 这样订单里的商品快照、SKU 引用都还在，商家误删后重新上架就能找回来；
+ * 真物理删会把历史订单的商品信息一起打空，所以这里不给这个口子。
+ *
+ * 不存在的 id 直接跳过，affected 是实际改动条数（可能小于请求数）。
+ */
+export async function batchSoftDeleteProducts(ids: number[]) {
+  const unique = [...new Set(ids)];
+  if (!unique.length) throw badRequest('PARAM_ERROR', '请至少选择一个商品');
+  const { count } = await prisma.product.updateMany({
+    where: { id: { in: unique } },
+    data: { status: 'OFF' },
+  });
+  return { requested: unique.length, affected: count, ids: unique };
+}
+
 export async function updateSku(id: number, data: { specName?: string; price?: number }) {
   const sku = await prisma.sku.findUnique({ where: { id } });
   if (!sku) throw notFound('SKU 不存在');

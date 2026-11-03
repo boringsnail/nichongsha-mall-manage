@@ -9,6 +9,7 @@ import {
   updateProduct,
   setProductStatus,
   softDeleteProduct,
+  batchSoftDeleteProducts,
 } from '../services/productService.js';
 import {
   importProducts,
@@ -115,6 +116,20 @@ adminProductsRouter.post('/import', importSchema, asyncHandler(async (req, res) 
 
 adminProductsRouter.post('/', createSchema, asyncHandler(async (req, res) => {
   res.json({ code: 0, data: await createProduct(req.body) });
+}));
+
+// ---------- 批量删除 ----------
+// 手机上一页只有 10 条，逐条点删除太费劲；一次勾选多件统一下架。
+// 语义与 DELETE /:id 相同（软删 = status OFF），不做物理删除。
+// 路由必须排在 /:id 之前，否则 "batch-delete" 会被当成 id 去解析。
+const batchDeleteSchema = validate({
+  body: z.object({
+    ids: z.array(z.number().int().positive()).min(1).max(200),
+  }),
+});
+
+adminProductsRouter.post('/batch-delete', batchDeleteSchema, asyncHandler(async (req, res) => {
+  res.json({ code: 0, data: await batchSoftDeleteProducts(req.body.ids) });
 }));
 
 adminProductsRouter.get('/:id', idParam, asyncHandler(async (req, res) => {

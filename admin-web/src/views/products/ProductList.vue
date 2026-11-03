@@ -16,12 +16,41 @@
       <el-button type="primary" @click="load">查询</el-button>
       <el-button type="success" @click="goCreate">+ 录入商品</el-button>
       <el-button @click="goImport">批量导入</el-button>
+      <!-- 桌面：勾表格左侧的选择列后点这里；手机：点它进入多选态 -->
+      <el-button
+        v-if="isMobile"
+        :type="selectMode ? 'info' : 'danger'"
+        plain
+        @click="toggleSelectMode"
+      >
+        {{ selectMode ? '退出多选' : '批量删除' }}
+      </el-button>
+      <el-button
+        v-else
+        type="danger"
+        plain
+        :disabled="!selectedIds.length || removing"
+        :loading="removing"
+        @click="doBatchRemove(selectedIds)"
+      >
+        批量删除{{ selectedIds.length ? `（${selectedIds.length}）` : '' }}
+      </el-button>
     </div>
 
     <!-- 手机：表格 6 列在 390px 下必然横滑，改成卡片流，一屏一张、动作直接点 -->
-    <div v-if="isMobile" v-loading="loading" class="p-list">
-      <article v-for="row in rows" :key="row.id" class="p-card">
+    <div v-if="isMobile" v-loading="loading" class="p-list" :class="{ 'has-batchbar': selectMode }">
+      <article
+        v-for="row in rows"
+        :key="row.id"
+        class="p-card"
+        :class="{ picked: selectMode && isPicked(row.id) }"
+        @click="selectMode && togglePick(row.id)"
+      >
         <div class="p-hd">
+          <!-- 多选态：左边多一个勾选圈，点整张卡也能切换，不用精确点中小方块 -->
+          <span v-if="selectMode" class="p-check" :class="{ on: isPicked(row.id) }">
+            {{ isPicked(row.id) ? '✓' : '' }}
+          </span>
           <img v-if="row.coverImage" :src="mediaSrc(row.coverImage)" class="p-cover" :alt="row.name" />
           <div v-else class="p-cover ph">无图</div>
           <div class="p-info">
@@ -35,7 +64,8 @@
             {{ row.status === 'ON' ? '上架' : '下架' }}
           </el-tag>
         </div>
-        <div class="p-acts">
+        <!-- 多选态下收起逐条动作，避免想勾选却点成「删除」 -->
+        <div v-if="!selectMode" class="p-acts">
           <el-button size="small" @click="goEdit(row.id)">编辑</el-button>
           <el-button v-if="row.status === 'ON'" size="small" @click="toggle(row, 'OFF')">下架</el-button>
           <el-button v-else size="small" type="success" plain @click="toggle(row, 'ON')">上架</el-button>
@@ -43,9 +73,34 @@
         </div>
       </article>
       <el-empty v-if="!loading && !rows.length" description="没有商品" />
+
+      <!-- 多选操作条：贴住底部标签栏上方，勾完直接删，不用滚回顶部 -->
+      <div v-if="selectMode" class="p-batchbar">
+        <span class="mono p-batchinfo">已选 {{ picked.length }}</span>
+        <el-button size="small" @click="togglePickAll">{{ allPicked ? '取消全选' : '全选本页' }}</el-button>
+        <el-button
+          size="small"
+          type="danger"
+          :disabled="!picked.length || removing"
+          :loading="removing"
+          @click="doBatchRemove(picked)"
+        >
+          删除
+        </el-button>
+      </div>
     </div>
 
-    <el-table v-else v-loading="loading" :data="rows" border stripe>
+    <el-table
+      v-else
+      ref="tableRef"
+      v-loading="loading"
+      :data="rows"
+      row-key="id"
+      border
+      stripe
+      @selection-change="onSelectionChange"
+    >
+      <el-table-column type="selection" width="44" :selectable="() => true" />
       <el-table-column label="商品" min-width="300">
         <template #default="{ row }">
           <div class="prod-cell">
@@ -99,12 +154,19 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import type { TableInstance } from 'element-plus';
 import { useIsMobile } from '@/composables/useIsMobile';
 import { mediaSrc } from '@/api/media';
-import { adminDeleteProduct, adminListProducts, adminSetProductStatus, type ProductRow } from '@/api/products';
+import {
+  adminBatchDeleteProducts,
+  adminDeleteProduct,
+  adminListProducts,
+  adminSetProductStatus,
+  type ProductRow,
+} from '@/api/products';
 import { fenToYuan } from '@/utils/money';
 
 const { isMobile } = useIsMobile();
@@ -116,6 +178,73 @@ const status = ref<'ON' | 'OFF' | ''>('');
 const page = ref(1);
 const size = ref(10);
 const total = ref(0);
+
+/* ------------------------------------------------------------------ 批量删除
+ * 两套 UI 两套选择态：
+ *   - 桌面走 el-table 的 selection 列，selectedIds 由表格回传
+ *   - 手机没有表格，自己维护 picked（点整张卡片切换），底部出操作条
+ * 两者最终都走同一个 doBatchRemove()，语义与单条删除一致：软删 = 下架。
+ */
+const tableRef = ref<TableInstance>();
+const selectedIds = ref<number[]>([]);
+const selectMode = ref(false);
+const picked = ref<number[]>([]);
+const removing = ref(false);
+
+const allPicked = computed(() => rows.value.length > 0 && picked.value.length === rows.value.length);
+const isPicked = (id: number) => picked.value.includes(id);
+
+function onSelectionChange(selected: ProductRow[]) {
+  selectedIds.value = selected.map((r) => r.id);
+}
+
+function toggleSelectMode() {
+  selectMode.value = !selectMode.value;
+  if (!selectMode.value) picked.value = [];
+}
+
+function togglePick(id: number) {
+  const i = picked.value.indexOf(id);
+  if (i >= 0) picked.value.splice(i, 1);
+  else picked.value.push(id);
+}
+
+function togglePickAll() {
+  picked.value = allPicked.value ? [] : rows.value.map((r) => r.id);
+}
+
+/** 清掉两套选择态，删完/翻页/重新查询后都调一次，避免选中已不在列表里的 id */
+function resetSelection() {
+  picked.value = [];
+  selectedIds.value = [];
+  tableRef.value?.clearSelection();
+}
+
+async function doBatchRemove(ids: number[]) {
+  if (!ids.length || removing.value) return;
+  try {
+    await ElMessageBox.confirm(
+      `确认删除选中的 ${ids.length} 件商品？\n删除即下架并从 C 端隐藏，之后重新上架即可找回。`,
+      '批量删除',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    );
+  } catch {
+    return; // 取消不提示
+  }
+  removing.value = true;
+  try {
+    const r = await adminBatchDeleteProducts(ids);
+    const skipped = r.requested - r.affected;
+    ElMessage.success(skipped > 0 ? `已删除 ${r.affected} 件，${skipped} 件不存在已跳过` : `已删除 ${r.affected} 件商品`);
+    selectMode.value = false;
+    resetSelection();
+    await load();
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : '批量删除失败');
+  } finally {
+    removing.value = false;
+  }
+}
 
 function totalStock(row: ProductRow) {
   return row.skus.reduce((sum, s) => sum + s.stock, 0);
@@ -140,6 +269,8 @@ async function load() {
     });
     rows.value = data.list;
     total.value = data.total;
+    // 换页/换筛选条件后旧的选择已经不在列表里，一起清掉
+    resetSelection();
   } catch (e) {
     ElMessage.error(e instanceof Error ? e.message : '加载失败');
   } finally {
@@ -193,6 +324,7 @@ onMounted(load);
 <style scoped>
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -229,11 +361,38 @@ onMounted(load);
   gap: 10px;
   min-height: 120px;
 }
+/* 多选态底部多出一条操作条，末尾补等高的内边距，别让最后一张卡被盖住 */
+.p-list.has-batchbar {
+  padding-bottom: 56px;
+}
 .p-card {
   border: 1px solid var(--line-1);
   border-radius: var(--r-1);
   background: var(--ink-850);
   padding: 12px;
+}
+/* 多选态：整张卡可点，选中后描边高亮，一眼看出勾了哪几张 */
+.p-card.picked {
+  border-color: var(--el-color-danger);
+  box-shadow: 0 0 0 1px var(--el-color-danger) inset;
+}
+.p-check {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  margin-top: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-3);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  line-height: 1;
+  color: #fff;
+  background: transparent;
+}
+.p-check.on {
+  border-color: var(--el-color-danger);
+  background: var(--el-color-danger);
 }
 .p-hd {
   display: flex;
@@ -292,5 +451,29 @@ onMounted(load);
 .p-acts .el-button {
   flex: 1;
   margin-left: 0;
+}
+
+/* 多选操作条：压在底部标签栏（56px + 安全区）之上，别盖住导航 */
+.p-batchbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(56px + env(safe-area-inset-bottom));
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--ink-850);
+  border-top: 1px solid var(--line-1);
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
+}
+.p-batchbar .el-button {
+  margin-left: 0;
+}
+.p-batchinfo {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--text-hi);
 }
 </style>

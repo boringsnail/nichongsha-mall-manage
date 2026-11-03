@@ -94,7 +94,7 @@
             v-if="row.status === 'PAID' && !isRefunded(row)"
             size="small"
             type="primary"
-            @click="openShip(row.orderNo)"
+            @click="openShip(row)"
           >
             发货
           </el-button>
@@ -178,7 +178,7 @@
       <el-table-column label="操作" width="200" :fixed="isMobile ? false : 'right'">
         <template #default="{ row }">
           <el-button link type="primary" @click="openDetail(row.orderNo)">详情</el-button>
-          <el-button v-if="row.status === 'PAID' && !isRefunded(row)" link type="success" @click="openShip(row.orderNo)">发货</el-button>
+          <el-button v-if="row.status === 'PAID' && !isRefunded(row)" link type="success" @click="openShip(row)">发货</el-button>
           <el-button v-if="row.status === 'PAID' || row.status === 'SHIPPED'" link type="warning" @click="syncOne(row.orderNo)">
             同步
           </el-button>
@@ -821,8 +821,14 @@ const shipOrderNo = ref('');
 // logisticsType 默认快递，和绝大多数订单一致；改成同城/自提时不再要求填快递单号
 const shipForm = reactive({ logisticsType: 1, logisticsCompany: '', trackingNo: '', photos: [] as string[] });
 
-function openShip(orderNo: string) {
-  shipOrderNo.value = orderNo;
+function openShip(order: AdminOrderRow) {
+  // 按钮已经按 isRefunded 隐藏了，这里再兜一层：万一列表数据滞后（比如刚同步回来
+  // 退款状态、按钮还没重渲染），也不让发货弹窗打开。
+  if (isRefunded(order)) {
+    ElMessage.warning('该订单已退款，不能再发货');
+    return;
+  }
+  shipOrderNo.value = order.orderNo;
   shipForm.logisticsType = LOGISTICS_TYPE.EXPRESS;
   shipForm.logisticsCompany = '';
   shipForm.trackingNo = '';
@@ -831,6 +837,13 @@ function openShip(orderNo: string) {
 }
 
 async function submitShip() {
+  // 弹窗可能是退款前打开的，5 秒自动同步把状态刷成「已退款」时这里必须拦住
+  const latest = rows.value.find((r) => r.orderNo === shipOrderNo.value);
+  if (latest && isRefunded(latest)) {
+    shipVisible.value = false;
+    ElMessage.error('该订单已退款，不能再发货');
+    return;
+  }
   const isExpress = shipForm.logisticsType === LOGISTICS_TYPE.EXPRESS;
   if (isExpress && (!shipForm.logisticsCompany.trim() || !shipForm.trackingNo.trim())) {
     ElMessage.warning('快递发货需要填写物流公司与物流单号');

@@ -98,6 +98,22 @@ export function adminDeleteProduct(id: number): Promise<ProductRow> {
   return api.del<ProductRow>(`/admin/products/${id}`);
 }
 
+export interface BatchDeleteResult {
+  /** 请求删除的条数（已去重） */
+  requested: number;
+  /** 实际改成下架的条数（不存在的 id 会被跳过） */
+  affected: number;
+  ids: number[];
+}
+
+/**
+ * 批量删除：语义与单条删除一致 —— 软删（status=OFF），不物理删除，
+ * 误删后重新上架即可恢复。
+ */
+export function adminBatchDeleteProducts(ids: number[]): Promise<BatchDeleteResult> {
+  return api.post<BatchDeleteResult>('/admin/products/batch-delete', { ids });
+}
+
 // ---------- 批量导入 ----------
 
 export interface ImportRowInput {

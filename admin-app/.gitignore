@@ -11,3 +11,7 @@ android/capacitor-cordova-android-plugins/
 android/app/src/main/assets/public/
 android/app/src/main/assets/capacitor.config.json
 android/app/src/main/assets/capacitor.plugins.json
+
+# 发布签名（含密码，绝对不能入库；丢了就没法给已装 App 覆盖升级）
+android/keystore.properties
+android/keystore/
